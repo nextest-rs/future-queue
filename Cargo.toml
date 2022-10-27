@@ -1,0 +1,12 @@
+[package]
+name = "buffer-unordered-weighted"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fnv = "1.0.7"
+futures-util = { version = "0.3.25", default-features = false, features = ["std"] }
+pin-project-lite = "0.2.9"
+
+[dev-dependencies]
+futures = "0.3.25"
