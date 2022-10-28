@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 resolver = "2"
+rust-version = "1.56"
 
 [dependencies]
 futures-util = { version = "0.3.25", default-features = false, features = ["std"] }

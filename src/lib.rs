@@ -232,8 +232,9 @@ where
                     *this.current_weight =
                         this.current_weight.checked_add(weight).unwrap_or_else(|| {
                             panic!(
-                                "buffer_unordered_weighted: added weight {weight} to current {}, overflowed",
-                                this.current_weight
+                                "buffer_unordered_weighted: added weight {} to current {}, overflowed",
+                                weight,
+                                this.current_weight,
                             )
                         });
                     this.in_progress_queue
@@ -249,8 +250,9 @@ where
             Poll::Ready(Some((weight, output))) => {
                 *this.current_weight = this.current_weight.checked_sub(weight).unwrap_or_else(|| {
                     panic!(
-                        "buffer_unordered_weighted: subtracted weight {weight} from current {}, overflowed",
-                        this.current_weight
+                        "buffer_unordered_weighted: subtracted weight {} from current {}, overflowed",
+                        weight,
+                        this.current_weight,
                     )
                 });
                 return Poll::Ready(Some(output));

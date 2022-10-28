@@ -93,7 +93,8 @@ fn proptest_buffer_unordered_impl(state: TestState) {
                             // Check that the current weight doesn't go over the limit.
                             assert!(
                                 current_weight < state.max_weight,
-                                "current weight {current_weight} exceeds max weight {}",
+                                "current weight {} exceeds max weight {}",
+                                current_weight,
                                 state.max_weight,
                             );
                             current_weight += desc.weight;
@@ -124,11 +125,11 @@ fn proptest_buffer_unordered_impl(state: TestState) {
         let not_completed: Vec<_> = completed_map
             .iter()
             .enumerate()
-            .filter_map(|(n, &v)| (!v).then(|| format!("{n}")))
+            .filter_map(|(n, &v)| (!v).then(|| n.to_string()))
             .collect();
         if !not_completed.is_empty() {
             let not_completed_ids = not_completed.join(", ");
-            panic!("some futures did not complete: {not_completed_ids}");
+            panic!("some futures did not complete: {}", not_completed_ids);
         }
     })
 }
