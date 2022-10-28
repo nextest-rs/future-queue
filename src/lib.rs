@@ -18,11 +18,12 @@ pub trait StreamExt: Stream {
     /// An adaptor for creating a buffered list of pending futures (unordered), where
     /// each future has a different weight.
     ///
-    /// If this stream's item is `(usize, impl Future)`, then this adaptor will buffer futures up to
-    /// weight `n`, and then return the outputs in the order in which they complete. The limit `n`
-    /// may be exceeded if the last future to be queued has a weight greater than `n` minus the
-    /// total weight of currently executing futures. However, no further futures will be queued
-    /// until the total weight of running futures falls below `n`.
+    /// This stream must return values of type `(usize, impl Future)`, where the `usize` indicates
+    /// the weight of each future. This adaptor will buffer futures up to weight `max_weight`, and
+    /// then return the outputs in the order in which they complete. The weight may be exceeded if
+    /// the last future to be queued has a weight greater than `max_weight` minus the total weight
+    /// of currently executing futures. However, no further futures will be queued until the total
+    /// weights of running futures falls below `max_weight`.
     ///
     /// The adaptor will buffer futures in the order they're returned by the stream, without doing
     /// any reordering based on weight.
@@ -53,12 +54,12 @@ pub trait StreamExt: Stream {
     /// assert_eq!(buffered.next().await, None);
     /// # Ok::<(), &'static str>(()) }).unwrap();
     /// ```
-    fn buffer_unordered_weighted<Fut>(self, n: usize) -> BufferUnorderedWeighted<Self>
+    fn buffer_unordered_weighted<Fut>(self, max_weight: usize) -> BufferUnorderedWeighted<Self>
     where
         Self: Sized + Stream<Item = (usize, Fut)>,
         Fut: Future,
     {
-        assert_stream::<Fut::Output, _>(BufferUnorderedWeighted::new(self, n))
+        assert_stream::<Fut::Output, _>(BufferUnorderedWeighted::new(self, max_weight))
     }
 }
 
@@ -74,8 +75,8 @@ pin_project! {
         #[pin]
         stream: Fuse<St>,
         in_progress_queue: FuturesUnordered<FutureWithWeight<<St::Item as WeightedFuture>::Future>>,
-        max: usize,
-        permits_issued: usize,
+        max_weight: usize,
+        current_weight: usize,
     }
 }
 
@@ -88,8 +89,8 @@ where
         f.debug_struct("BufferUnorderedWeighted")
             .field("stream", &self.stream)
             .field("in_progress_queue", &self.in_progress_queue)
-            .field("max", &self.max)
-            .field("permits_issued", &self.permits_issued)
+            .field("max_weight", &self.max_weight)
+            .field("current_weight", &self.current_weight)
             .finish()
     }
 }
@@ -99,13 +100,23 @@ where
     St: Stream,
     St::Item: WeightedFuture,
 {
-    pub(crate) fn new(stream: St, n: usize) -> Self {
+    pub(crate) fn new(stream: St, max_weight: usize) -> Self {
         Self {
             stream: stream.fuse(),
             in_progress_queue: FuturesUnordered::new(),
-            max: n,
-            permits_issued: 0,
+            max_weight,
+            current_weight: 0,
         }
+    }
+
+    /// Returns the maximum weight of futures allowed to be run by this adaptor.
+    pub fn max_weight(&self) -> usize {
+        self.max_weight
+    }
+
+    /// Returns the currently running weight of futures.
+    pub fn current_weight(&self) -> usize {
+        self.current_weight
     }
 
     /// Acquires a reference to the underlying sink or stream that this combinator is
@@ -153,15 +164,15 @@ where
 
         // First up, try to spawn off as many futures as possible by filling up
         // our queue of futures.
-        while *this.permits_issued < *this.max {
+        while *this.current_weight < *this.max_weight {
             match this.stream.as_mut().poll_next(cx) {
                 Poll::Ready(Some(weighted_future)) => {
                     let (weight, future) = weighted_future.into_components();
-                    *this.permits_issued =
-                        this.permits_issued.checked_add(weight).unwrap_or_else(|| {
+                    *this.current_weight =
+                        this.current_weight.checked_add(weight).unwrap_or_else(|| {
                             panic!(
-                                "buffer_unordered_weighted: added weight {weight} to issued permits {}, overflowed",
-                                this.permits_issued
+                                "buffer_unordered_weighted: added weight {weight} to current {}, overflowed",
+                                this.current_weight
                             )
                         });
                     this.in_progress_queue
@@ -175,10 +186,10 @@ where
         match this.in_progress_queue.poll_next_unpin(cx) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(Some((weight, output))) => {
-                *this.permits_issued = this.permits_issued.checked_sub(weight).unwrap_or_else(|| {
+                *this.current_weight = this.current_weight.checked_sub(weight).unwrap_or_else(|| {
                     panic!(
-                        "buffer_unordered_weighted: subtracted weight {weight} from issued permits {}, overflowed",
-                        this.permits_issued
+                        "buffer_unordered_weighted: subtracted weight {weight} from current {}, overflowed",
+                        this.current_weight
                     )
                 });
                 return Poll::Ready(Some(output));
