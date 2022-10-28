@@ -220,7 +220,7 @@ where
 
 pin_project! {
     #[must_use = "futures do nothing unless polled"]
-    pub struct FutureWithWeight<Fut> {
+    struct FutureWithWeight<Fut> {
         #[pin]
         future: Fut,
         weight: usize,
