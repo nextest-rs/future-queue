@@ -3,6 +3,7 @@ use futures_util::{
     Future, Stream, StreamExt as _,
 };
 use pin_project_lite::pin_project;
+use private::WeightedFuture;
 use std::{
     fmt,
     pin::Pin,
@@ -17,10 +18,10 @@ pub trait StreamExt: Stream {
     /// An adaptor for creating a buffered list of pending futures (unordered), where
     /// each future has a different weight.
     ///
-    /// If this stream's item can be converted into a [`WeightedFuture`], then this adaptor
-    /// will buffer futures up to weight `n`, possibly (TODO)
-    /// and then return the outputs in the order in which they complete. Futures with total weight
-    /// less than `n` may also be buffered depending on the state of each future.
+    /// If this stream's item is `(usize, impl Future)`, then this adaptor will buffer futures up to
+    /// weight `n`, possibly exceeding `n` if a future overflows, and then return the outputs in the
+    /// order in which they complete. Futures with total weight less than `n` may also be buffered
+    /// depending on the state of each future.
     ///
     /// The returned stream will be a stream of each future's output.
     ///
@@ -46,19 +47,17 @@ pub trait StreamExt: Stream {
     /// assert_eq!(buffered.next().await, None);
     /// # Ok::<(), &'static str>(()) }).unwrap();
     /// ```
-    fn buffer_unordered_weighted(self, n: usize) -> BufferUnorderedWeighted<Self>
+    fn buffer_unordered_weighted<Fut>(self, n: usize) -> BufferUnorderedWeighted<Self>
     where
-        Self: Sized,
-        Self::Item: WeightedFuture,
+        Self: Sized + Stream<Item = (usize, Fut)>,
+        Fut: Future,
     {
-        assert_stream::<<<Self::Item as WeightedFuture>::Future as Future>::Output, _>(
-            BufferUnorderedWeighted::new(self, n),
-        )
+        assert_stream::<Fut::Output, _>(BufferUnorderedWeighted::new(self, n))
     }
 }
 
 pin_project! {
-    /// Stream for the [`buffer_unordered_weighted`](super::StreamExt::buffer_unordered)
+    /// Stream for the [`buffer_unordered_weighted`](StreamExt::buffer_unordered)
     /// method.
     #[must_use = "streams do nothing unless polled"]
     pub struct BufferUnorderedWeighted<St>
@@ -201,21 +200,25 @@ where
     }
 }
 
-pub trait WeightedFuture {
-    type Future: Future;
+mod private {
+    use futures_util::Future;
 
-    fn into_components(self) -> (usize, Self::Future);
-}
+    pub trait WeightedFuture {
+        type Future: Future;
 
-impl<Fut> WeightedFuture for (usize, Fut)
-where
-    Fut: Future,
-{
-    type Future = Fut;
+        fn into_components(self) -> (usize, Self::Future);
+    }
 
-    #[inline]
-    fn into_components(self) -> (usize, Self::Future) {
-        self
+    impl<Fut> WeightedFuture for (usize, Fut)
+    where
+        Fut: Future,
+    {
+        type Future = Fut;
+
+        #[inline]
+        fn into_components(self) -> (usize, Self::Future) {
+            self
+        }
     }
 }
 
