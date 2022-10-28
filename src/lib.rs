@@ -11,7 +11,8 @@ use std::{
 
 impl<T: ?Sized> StreamExt for T where T: Stream {}
 
-/// An extension trait for `Stream`s that provides `buffer_unordered_weighted`.
+/// An extension trait for `Stream`s that provides
+/// [`buffer_unordered_weighted`](StreamExt::buffer_unordered_weighted).
 pub trait StreamExt: Stream {
     /// An adaptor for creating a buffered list of pending futures (unordered), where
     /// each future has a different weight.
