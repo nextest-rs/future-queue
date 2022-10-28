@@ -72,6 +72,14 @@
 //! # Ok::<(), &'static str>(()) }).unwrap();
 //! ```
 //!
+//! # Minimum supported Rust version (MSRV)
+//!
+//! The minimum supported Rust version is **Rust 1.56.**
+//!
+//! The MSRV will likely not change in the medium term, but while this crate is a pre-release
+//! (0.x.x) it may have its MSRV bumped in a patch release. Once this crate has reached 1.x, any
+//! MSRV bump will be accompanied with a new minor version.
+//!
 //! [^1]: This adaptor takes a stream of futures for maximum generality. In practice this is often
 //!     an *iterator* of futures, converted over using
 //!     [`stream::iter`](https://docs.rs/futures/latest/futures/stream/fn.iter.html).
