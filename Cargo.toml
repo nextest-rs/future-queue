@@ -3,6 +3,8 @@ name = "buffer-unordered-weighted"
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+readme = "README.md"
+resolver = "2"
 
 [dependencies]
 futures-util = { version = "0.3.25", default-features = false, features = ["std"] }

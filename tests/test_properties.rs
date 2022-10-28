@@ -1,3 +1,6 @@
+// Copyright (c) The buffer-unordered-weighted Contributors
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 use buffer_unordered_weighted::StreamExt as _;
 use futures::{stream, StreamExt as _};
 use proptest::prelude::*;
