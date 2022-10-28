@@ -19,9 +19,10 @@ pub trait StreamExt: Stream {
     /// each future has a different weight.
     ///
     /// If this stream's item is `(usize, impl Future)`, then this adaptor will buffer futures up to
-    /// weight `n`, possibly exceeding `n` if a future overflows, and then return the outputs in the
-    /// order in which they complete. Futures with total weight less than `n` may also be buffered
-    /// depending on the state of each future.
+    /// weight `n`, and then return the outputs in the order in which they complete. The weight `n`
+    /// may be exceeded if the last future to be queued has a weight greater than `n` minus the
+    /// total weight of currently executing futures. However, no further futures will be queued
+    /// until the total weights of running futures falls below `n`.
     ///
     /// The returned stream will be a stream of each future's output.
     ///
