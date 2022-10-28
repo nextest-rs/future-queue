@@ -49,8 +49,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust-version }}
+      - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --all-features
       - name: Test
-        run: cargo test --all-features
+        run: cargo nextest run --all-features
+      - name: Run doctest
+        run: cargo test --doc --all-features
