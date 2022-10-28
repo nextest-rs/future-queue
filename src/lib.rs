@@ -24,6 +24,8 @@ pub trait StreamExt: Stream {
     /// total weight of currently executing futures. However, no further futures will be queued
     /// until the total weights of running futures falls below `n`.
     ///
+    /// The weight of a future can be 0, in which case it will not count towards the total weight.
+    ///
     /// The returned stream will be a stream of each future's output.
     ///
     /// # Examples
