@@ -1,11 +1,14 @@
 [package]
 name = "buffer-unordered-weighted"
 version = "0.1.0"
+description = "Stream::buffer_unordered where each future can have a different weight."
 edition = "2021"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 resolver = "2"
 rust-version = "1.56"
+categories = ["asynchronous"]
+keywords = ["stream", "futures", "async", "buffer_unordered"]
 
 [dependencies]
 futures-util = { version = "0.3.25", default-features = false, features = ["std"] }
