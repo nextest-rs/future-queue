@@ -28,7 +28,7 @@ pub trait StreamExt: Stream {
     ///
     /// ```
     /// # futures::executor::block_on(async {
-    /// use futures::{channel::oneshot, stream, FutureExt as _, StreamExt as _};
+    /// use futures::{channel::oneshot, stream, StreamExt as _};
     /// use buffer_unordered_weighted::{StreamExt as _};
     ///
     /// let (send_one, recv_one) = oneshot::channel();
