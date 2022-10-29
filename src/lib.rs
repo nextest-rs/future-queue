@@ -45,19 +45,18 @@
 //! wait until some of the currently executing futures complete, and the current weight of running
 //! futures drops below the maximum weight, before scheduling new futures.
 //!
-//! Note that in some cases, the current weight may exceed the maximum weight.
+//! Note that in some cases, the current weight may exceed the maximum weight. For example:
 //!
-//! * For example, let's say the maximum weight is 24, and the current weight is 20. If the next
-//! future has weight 6, then it will be buffered and the current weight will become 26. No new
-//! futures will be scheduled until the current weight falls to 23 or below.
+//! * Let's say the maximum weight is **24**, and the current weight is **20**.
+//! * If the next future has weight **6**, then it will be scheduled and the current weight will become **26**.
+//! * No new futures will be scheduled until the current weight falls to **23** or below.
 //!
 //! It is possible to have a variant of this adaptor which always stays below the limit and holds
 //! the next future in abeyance; however, the implementation for that variant is a bit more
 //! complicated, and is also not the behavior desired by nextest. This variant may be provided in
 //! the future.
 //!
-//! The weight of a future can even be zero, in which case it doesn't count towards the maximum
-//! weight.
+//! The weight of a future can be zero, in which case it doesn't count towards the maximum weight.
 //!
 //! If all weights are 1, then `buffer_unordered_weighted` is exactly the same as `buffer_unordered`.
 //!
@@ -121,17 +120,16 @@ pub trait StreamExt: Stream {
     /// `max_weight` minus the total weight of currently executing futures. However, no further
     /// futures will be queued until the total weights of running futures falls below `max_weight`.
     ///
-    /// The adaptor will buffer futures in the order they're returned by the stream, without doing
+    /// The adaptor will schedule futures in the order they're returned by the stream, without doing
     /// any reordering based on weight.
     ///
-    /// The weight of a future can be 0, in which case it will not count towards the total weight.
+    /// The weight of a future can be zero, in which case it will not count towards the total weight.
     ///
     /// The returned stream will be a stream of each future's output.
     ///
     /// # Examples
     ///
     /// See [the crate documentation](crate#examples) for an example.
-    ///
     fn buffer_unordered_weighted<Fut>(self, max_weight: usize) -> BufferUnorderedWeighted<Self>
     where
         Self: Sized + Stream<Item = (usize, Fut)>,

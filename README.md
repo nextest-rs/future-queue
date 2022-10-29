@@ -51,19 +51,18 @@ futures to be run until the maximum weight is exceeded. Once that happens, this 
 wait until some of the currently executing futures complete, and the current weight of running
 futures drops below the maximum weight, before scheduling new futures.
 
-Note that in some cases, the current weight may exceed the maximum weight.
+Note that in some cases, the current weight may exceed the maximum weight. For example:
 
-* For example, let's say the maximum weight is 24, and the current weight is 20. If the next
-future has weight 6, then it will be buffered and the current weight will become 26. No new
-futures will be scheduled until the current weight falls to 23 or below.
+* Let's say the maximum weight is **24**, and the current weight is **20**.
+* If the next future has weight **6**, then it will be scheduled and the current weight will become **26**.
+* No new futures will be scheduled until the current weight falls to **23** or below.
 
 It is possible to have a variant of this adaptor which always stays below the limit and holds
 the next future in abeyance; however, the implementation for that variant is a bit more
 complicated, and is also not the behavior desired by nextest. This variant may be provided in
 the future.
 
-The weight of a future can even be zero, in which case it doesn't count towards the maximum
-weight.
+The weight of a future can be zero, in which case it doesn't count towards the maximum weight.
 
 If all weights are 1, then `buffer_unordered_weighted` is exactly the same as `buffer_unordered`.
 
