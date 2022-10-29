@@ -12,7 +12,7 @@
 where each future can be assigned a different weight.
 
 This crate is part of the [nextest organization](https://github.com/nextest-rs) on GitHub, and is
-designed to serve the needs of cargo-nextest.
+designed to serve the needs of [cargo-nextest](https://nexte.st).
 
 ## Motivation
 
