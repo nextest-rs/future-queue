@@ -40,19 +40,21 @@
 //! several futures simultaneously, limiting the concurrency to a maximum *weight*.
 //!
 //! Rather than taking a stream of futures, this adaptor takes a stream of `(usize, future)` pairs,
-//! where the `usize` indicates the weight of each future. This adapter will run and buffer up
-//! futures until the maximum weight is exceeded. After that, futures will only be polled after the
-//! current weight of running futures drops below the maximum weight.
+//! where the `usize` indicates the weight of each future. This adaptor will schedule and buffer
+//! futures to be run until the maximum weight is exceeded. Once that happens, this adapter will
+//! wait until some of the currently executing futures complete, and the current weight of running
+//! futures drops below the maximum weight, before scheduling new futures.
 //!
 //! Note that in some cases, the current weight may exceed the maximum weight.
 //!
 //! * For example, let's say the maximum weight is 24, and the current weight is 20. If the next
-//! future has weight 5, then it will be buffered and the current weight will become 25. No further
-//! futures will be buffered until the current weight falls to 23 or below.
+//! future has weight 6, then it will be buffered and the current weight will become 26. No new
+//! futures will be scheduled until the current weight falls to 23 or below.
 //!
-//! It is possible to have a variant which always stays below the limit and hold the next future in
-//! abeyance; however, the implementation for that variant is a bit more complicated, and is also
-//! not the behavior desired by nextest. An adaptor to do so may be provided in the future.
+//! It is possible to have a variant of this adaptor which always stays below the limit and holds
+//! the next future in abeyance; however, the implementation for that variant is a bit more
+//! complicated, and is also not the behavior desired by nextest. This variant may be provided in
+//! the future.
 //!
 //! The weight of a future can even be zero, in which case it doesn't count towards the maximum
 //! weight.
