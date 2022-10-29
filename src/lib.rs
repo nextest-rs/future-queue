@@ -36,12 +36,12 @@
 //!
 //! # About this crate
 //!
-//! This crate provides an adapter on streams called `buffer_unordered_weighted`, which can run
+//! This crate provides an adaptor on streams called `buffer_unordered_weighted`, which can run
 //! several futures simultaneously, limiting the concurrency to a maximum *weight*.
 //!
 //! Rather than taking a stream of futures, this adaptor takes a stream of `(usize, future)` pairs,
 //! where the `usize` indicates the weight of each future. This adaptor will schedule and buffer
-//! futures to be run until the maximum weight is exceeded. Once that happens, this adapter will
+//! futures to be run until the maximum weight is exceeded. Once that happens, this adaptor will
 //! wait until some of the currently executing futures complete, and the current weight of running
 //! futures drops below the maximum weight, before scheduling new futures.
 //!
