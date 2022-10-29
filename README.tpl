@@ -18,6 +18,9 @@ See the [CONTRIBUTING](CONTRIBUTING.md) file for how to help out.
 This project is available under the terms of either the [Apache 2.0 license](LICENSE-APACHE) or
 the [MIT license](LICENSE-MIT).
 
+The code is derived from [futures-rs](https://github.com/rust-lang/futures-rs), and is used under
+the Apache 2.0 and MIT licenses.
+
 <!--
 README.md is generated from README.tpl by cargo readme. To regenerate, run from the repository root:
 
