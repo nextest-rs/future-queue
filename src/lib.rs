@@ -6,12 +6,14 @@
 //! where each future can be assigned a different weight.
 //!
 //! This crate is part of the [nextest organization](https://github.com/nextest-rs) on GitHub, and is
-//! designed to serve the needs of cargo-nextest.
+//! designed to serve the needs of [cargo-nextest](https://nexte.st).
 //!
 //! # Motivation
 //!
-//! Async programming in Rust often uses an adaptor called `buffer_unordered`: this adaptor takes a
-//! stream of futures[^1], and executes all the futures limited to a maximum amount of concurrency.
+//! Async programming in Rust often uses an adaptor called
+//! [`buffer_unordered`](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html#method.buffer_unordered):
+//! this adaptor takes a stream of futures[^1], and executes all the futures limited to a maximum
+//! amount of concurrency.
 //!
 //! * Futures are started in the order the stream returns them in.
 //! * Once started, futures are polled simultaneously, and completed future outputs are returned
@@ -25,24 +27,32 @@
 //!
 //! `buffer_unordered` works well for many use cases. However, one issue with it is that it treats
 //! all futures as equally taxing: there's no way to say that some futures consume more resources
-//! than others. For nextest in particular, some tests can be much heavier-weight than others, and
-//! fewer of those tests should be run simultaneously.
+//! than others. For nextest in particular, some tests can be much heavier than others, and fewer of
+//! those tests should be run simultaneously.
+//!
+//! [^1]: This adaptor takes a stream of futures for maximum generality. In practice this is often
+//!     an *iterator* of futures, converted over using
+//!     [`stream::iter`](https://docs.rs/futures/latest/futures/stream/fn.iter.html).
 //!
 //! # About this crate
 //!
 //! This crate provides an adapter on streams called `buffer_unordered_weighted`, which can run
-//! several futures simultaneously, limiting the concurrency to a maximum *weight*. Rather than taking a
-//! stream of futures, it takes a stream of `(usize, future)` pairs, where the `usize` indicates the
-//! weight of each future. This adapter will buffer futures until the maximum weight is exceeded.
-//! Further futures will only be run after the current weight of running futures drops below the maximum
-//! weight.
+//! several futures simultaneously, limiting the concurrency to a maximum *weight*.
 //!
-//! Note that in some cases, the current weight may exceed the maximum weight. For example, let's say
-//! the maximum weight is 24, and the current weight is 20. If the next future has weight 5, then it
-//! will be buffered and the current weight will become 25. No further futures will be buffered until
-//! the current weight falls to 23 or below. (It is possible to always stay below the limit and hold the
-//! next future in abeyance; however, that complicates the implementation a little and is also not the
-//! behavior desired by nextest. An adapter to do so may be provided in the future.)
+//! Rather than taking a stream of futures, this adaptor takes a stream of `(usize, future)` pairs,
+//! where the `usize` indicates the weight of each future. This adapter will run and buffer up
+//! futures until the maximum weight is exceeded. After that, futures will only be polled after the
+//! current weight of running futures drops below the maximum weight.
+//!
+//! Note that in some cases, the current weight may exceed the maximum weight.
+//!
+//! * For example, let's say the maximum weight is 24, and the current weight is 20. If the next
+//! future has weight 5, then it will be buffered and the current weight will become 25. No further
+//! futures will be buffered until the current weight falls to 23 or below.
+//!
+//! It is possible to have a variant which always stays below the limit and hold the next future in
+//! abeyance; however, the implementation for that variant is a bit more complicated, and is also
+//! not the behavior desired by nextest. An adaptor to do so may be provided in the future.
 //!
 //! The weight of a future can even be zero, in which case it doesn't count towards the maximum
 //! weight.
@@ -79,10 +89,6 @@
 //! The MSRV will likely not change in the medium term, but while this crate is a pre-release
 //! (0.x.x) it may have its MSRV bumped in a patch release. Once this crate has reached 1.x, any
 //! MSRV bump will be accompanied with a new minor version.
-//!
-//! [^1]: This adaptor takes a stream of futures for maximum generality. In practice this is often
-//!     an *iterator* of futures, converted over using
-//!     [`stream::iter`](https://docs.rs/futures/latest/futures/stream/fn.iter.html).
 //!
 
 use futures_util::{
