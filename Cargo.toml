@@ -5,6 +5,7 @@ description = "Stream::buffer_unordered where each future can have a different w
 edition = "2021"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/nextest-rs/buffer-unordered-weighted"
 resolver = "2"
 rust-version = "1.56"
 categories = ["asynchronous"]
