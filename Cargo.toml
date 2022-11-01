@@ -1,6 +1,6 @@
 [package]
 name = "buffer-unordered-weighted"
-version = "0.1.1"
+version = "0.1.2"
 description = "Stream::buffer_unordered where each future can have a different weight."
 edition = "2021"
 license = "MIT OR Apache-2.0"
