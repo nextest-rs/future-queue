@@ -170,9 +170,10 @@ where
 ///
 /// Provided in case it's necessary. This trait is only implemented for `(usize, impl Future)`.
 pub trait WeightedFuture: private::Sealed {
+    /// The associated `Future` type.
     type Future: Future;
 
-    /// Turns this trait into its components.
+    /// Turns self into its components.
     fn into_components(self) -> (usize, Self::Future);
 }
 

@@ -1,9 +1,14 @@
 // Copyright (c) The future-queue Contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `future_queue` is a variant of
-//! [`buffer_unordered`](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html#method.buffer_unordered),
-//! where each future can be assigned a different weight.
+#![warn(missing_docs)]
+
+//! `future_queue` provides ways to run several futures:
+//!
+//! * concurrently
+//! * in the order they're spawned
+//! * with global limits
+//! * and with an optional group specified for each future, with its own limits.
 //!
 //! This crate is part of the [nextest organization](https://github.com/nextest-rs) on GitHub, and is
 //! designed to serve the needs of [cargo-nextest](https://nexte.st).
@@ -27,8 +32,11 @@
 //!
 //! `buffer_unordered` works well for many use cases. However, one issue with it is that it treats
 //! all futures as equally taxing: there's no way to say that some futures consume more resources
-//! than others. For nextest in particular, some tests can be much heavier than others, and fewer of
-//! those tests should be run simultaneously.
+//! than others, or that some subsets of futures should be mutually excluded from others.
+//!
+//! For nextest in particular, some tests can be much heavier than others, and fewer of those tests
+//! should be run simultaneously. Also, some tests need to be mutually excluded from others, or
+//! other concurrency limits placed on them.
 //!
 //! [^1]: This adaptor takes a stream of futures for maximum generality. In practice this is often
 //!     an *iterator* of futures, converted over using
@@ -36,8 +44,12 @@
 //!
 //! # About this crate
 //!
-//! This crate provides an adaptor on streams called `future_queue`, which can run
-//! several futures simultaneously, limiting the concurrency to a maximum *weight*.
+//! This crate provides two adaptors on streams.
+//!
+//! ## 1. The `future_queue` adaptor
+//!
+//! The [`future_queue`](StreamExt::future_queue) adaptor can run several futures simultaneously,
+//! limiting the concurrency to a maximum *weight*.
 //!
 //! Rather than taking a stream of futures, this adaptor takes a stream of `(usize, future)` pairs,
 //! where the `usize` indicates the weight of each future. This adaptor will schedule and buffer
@@ -51,18 +63,13 @@
 //! * If the next future has weight **6**, then it will be scheduled and the current weight will become **26**.
 //! * No new futures will be scheduled until the current weight falls to **23** or below.
 //!
-//! It is possible to have a variant of this adaptor which always stays below the limit and holds
-//! the next future in abeyance; however, the implementation for that variant is a bit more
-//! complicated, and is also not the behavior desired by nextest. This variant may be provided in
-//! the future.
-//!
 //! The weight of a future can be zero, in which case it doesn't count towards the maximum weight.
 //!
 //! If all weights are 1, then `future_queue` is exactly the same as `buffer_unordered`.
 //!
-//! # Examples
+//! ### Examples
 //!
-//! ```
+//! ```rust
 //! # futures::executor::block_on(async {
 //! use futures::{channel::oneshot, stream, StreamExt as _};
 //! use future_queue::{StreamExt as _};
@@ -72,6 +79,48 @@
 //!
 //! let stream_of_futures = stream::iter(vec![(1, recv_one), (2, recv_two)]);
 //! let mut queue = stream_of_futures.future_queue(10);
+//!
+//! send_two.send("hello")?;
+//! assert_eq!(queue.next().await, Some(Ok("hello")));
+//!
+//! send_one.send("world")?;
+//! assert_eq!(queue.next().await, Some(Ok("world")));
+//!
+//! assert_eq!(queue.next().await, None);
+//! # Ok::<(), &'static str>(()) }).unwrap();
+//! ```
+//!
+//! ## 2. The `future_queue_grouped` adaptor
+//!
+//! The [`future_queue_grouped`](StreamExt::future_queue_grouped) adaptor is like `future_queue`,
+//! except it is possible to specify an optional *group* for each future. Each group has a maximum
+//! weight, and a future will only be scheduled if both the maximum weight and the group weight
+//! aren't exceeded.
+//!
+//! The adaptor is as fair as possible under the given constraints: it will schedule futures in
+//! the order they're returned by the stream, without doing any reordering based on weight. When
+//! a future from a group completes, queued up futures in this group will be preferentially
+//! scheduled before any other futures from the provided stream.
+//!
+//! The current weight for groups may exceed the maximum weight, similar to `future_queue`.
+//!
+//! ### Examples
+//!
+//! ```rust
+//! # futures::executor::block_on(async {
+//! use futures::{channel::oneshot, stream, StreamExt as _};
+//! use future_queue::{StreamExt as _};
+//!
+//! let (send_one, recv_one) = oneshot::channel();
+//! let (send_two, recv_two) = oneshot::channel();
+//!
+//! let stream_of_futures = stream::iter(
+//!     vec![
+//!         (1, Some("group1"), recv_one),
+//!         (2, None, recv_two),
+//!     ],
+//! );
+//! let mut queue = stream_of_futures.future_queue_grouped(10, [("group1", 5)]);
 //!
 //! send_two.send("hello")?;
 //! assert_eq!(queue.next().await, Some(Ok("hello")));
@@ -97,26 +146,30 @@
 //! more descriptive about what the crate does rather than how it's implemented.
 
 mod future_queue;
+mod future_queue_grouped;
+mod peekable_fused;
 
 pub use crate::future_queue::FutureQueue;
+pub use future_queue_grouped::FutureQueueGrouped;
 
 /// Traits to aid in type definitions.
 ///
 /// These traits are normally not required by end-user code, but may be necessary for some generic
 /// code.
 pub mod traits {
-    pub use crate::future_queue::WeightedFuture;
+    pub use crate::{future_queue::WeightedFuture, future_queue_grouped::GroupedWeightedFuture};
 }
 
 use futures_util::{Future, Stream};
+use std::{borrow::Borrow, hash::Hash};
 
 impl<T: ?Sized> StreamExt for T where T: Stream {}
 
 /// An extension trait for `Stream`s that provides
 /// [`future_queue`](StreamExt::future_queue).
 pub trait StreamExt: Stream {
-    /// An adaptor for creating a buffered list of pending futures (unordered), where
-    /// each future has a different weight.
+    /// An adaptor for creating a queue of pending futures (unordered), where each future has a
+    /// different weight.
     ///
     /// This stream must return values of type `(usize, impl Future)`, where the `usize` indicates
     /// the weight of each future. This adaptor will buffer futures up to weight `max_weight`, and
@@ -142,6 +195,46 @@ pub trait StreamExt: Stream {
         Fut: Future,
     {
         assert_stream::<Fut::Output, _>(FutureQueue::new(self, max_weight))
+    }
+
+    /// An adaptor for creating a queue of pending futures, where each future has a different weight
+    /// and optional group.
+    ///
+    /// This method accepts a maximum global weight, as well as a set of *groups* of type `K`. Each
+    /// group has a defined maximum weight. This stream must return values of type `(usize,
+    /// Option<Q>, impl Future)`, where `K` is `Borrow<Q>`.
+    ///
+    /// This adapter will buffer futures up to weight `max_weight`. If the optional group is
+    /// specified for a future, it will also check that the weight of futures in that group does not
+    /// exceed the specified limit. Any futures that exceed the group's weight limit will be queued
+    /// up, but not scheduled until the weight of futures in that group falls below the limit.
+    ///
+    /// The adaptor is as fair as possible under the given constraints: it will schedule futures in
+    /// the order they're returned by the stream, without doing any reordering based on weight. When
+    /// a future from a group completes, queued up futures in this group will be preferentially
+    /// scheduled before any other futures from the provided stream.
+    ///
+    /// The weight of a future can be zero, in which case it will not count towards the total weight.
+    ///
+    /// The returned stream will be a stream of each future's output.
+    ///
+    /// # Panics
+    ///
+    /// The stream panics if the optional group provided by a stream element isn't in the set of
+    /// known groups.
+    fn future_queue_grouped<Fut, I, K, Q>(
+        self,
+        max_global_weight: usize,
+        groups: I,
+    ) -> FutureQueueGrouped<Self, K>
+    where
+        I: IntoIterator<Item = (K, usize)>,
+        K: Eq + Hash + Borrow<Q> + std::fmt::Debug,
+        Q: Eq + Hash + std::fmt::Debug,
+        Self: Sized + Stream<Item = (usize, Option<Q>, Fut)>,
+        Fut: Future,
+    {
+        assert_stream::<Fut::Output, _>(FutureQueueGrouped::new(self, max_global_weight, groups))
     }
 }
 

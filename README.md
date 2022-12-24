@@ -7,9 +7,11 @@
 [![License](https://img.shields.io/badge/license-Apache-green.svg)](LICENSE-APACHE)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE-MIT)
 
-`future_queue` is a variant of
-[`buffer_unordered`](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html#method.buffer_unordered),
-where each future can be assigned a different weight.
+`future_queue` provides ways to run several futures:
+* concurrently
+* in the order they're spawned
+* with global limits
+* and with an optional group specified for each future, with its own limits.
 
 This crate is part of the [nextest organization](https://github.com/nextest-rs) on GitHub, and is
 designed to serve the needs of [cargo-nextest](https://nexte.st).
@@ -33,8 +35,11 @@ Common use cases for `buffer_unordered` include:
 
 `buffer_unordered` works well for many use cases. However, one issue with it is that it treats
 all futures as equally taxing: there's no way to say that some futures consume more resources
-than others. For nextest in particular, some tests can be much heavier than others, and fewer of
-those tests should be run simultaneously.
+than others, or that some subsets of futures should be mutually excluded from others.
+
+For nextest in particular, some tests can be much heavier than others, and fewer of those tests
+should be run simultaneously. Also, some tests need to be mutually excluded from others, or
+other concurrency limits placed on them.
 
 [^1]: This adaptor takes a stream of futures for maximum generality. In practice this is often
     an *iterator* of futures, converted over using
@@ -42,8 +47,12 @@ those tests should be run simultaneously.
 
 ## About this crate
 
-This crate provides an adaptor on streams called `future_queue`, which can run
-several futures simultaneously, limiting the concurrency to a maximum *weight*.
+This crate provides two adaptors on streams.
+
+### 1. The `future_queue` adaptor
+
+The [`future_queue`](StreamExt::future_queue) adaptor can run several futures simultaneously,
+limiting the concurrency to a maximum *weight*.
 
 Rather than taking a stream of futures, this adaptor takes a stream of `(usize, future)` pairs,
 where the `usize` indicates the weight of each future. This adaptor will schedule and buffer
@@ -57,16 +66,11 @@ Note that in some cases, the current weight may exceed the maximum weight. For e
 * If the next future has weight **6**, then it will be scheduled and the current weight will become **26**.
 * No new futures will be scheduled until the current weight falls to **23** or below.
 
-It is possible to have a variant of this adaptor which always stays below the limit and holds
-the next future in abeyance; however, the implementation for that variant is a bit more
-complicated, and is also not the behavior desired by nextest. This variant may be provided in
-the future.
-
 The weight of a future can be zero, in which case it doesn't count towards the maximum weight.
 
 If all weights are 1, then `future_queue` is exactly the same as `buffer_unordered`.
 
-## Examples
+#### Examples
 
 ```rust
 use futures::{channel::oneshot, stream, StreamExt as _};
@@ -77,6 +81,41 @@ let (send_two, recv_two) = oneshot::channel();
 
 let stream_of_futures = stream::iter(vec![(1, recv_one), (2, recv_two)]);
 let mut queue = stream_of_futures.future_queue(10);
+
+send_two.send("hello")?;
+assert_eq!(queue.next().await, Some(Ok("hello")));
+
+send_one.send("world")?;
+assert_eq!(queue.next().await, Some(Ok("world")));
+
+assert_eq!(queue.next().await, None);
+```
+
+### 2. The `future_queue_grouped` adaptor
+
+The [`future_queue_grouped`](StreamExt::future_queue_grouped) adaptor is like `future_queue`,
+except it is possible to specify an optional *group* for each future. Each group has a maximum
+weight, and a future will only be scheduled if both the maximum weight and the group weight
+aren't exceeded.
+
+The current weight for groups may exceed the maximum weight, similar to `future_queue`.
+
+#### Examples
+
+```rust
+use futures::{channel::oneshot, stream, StreamExt as _};
+use future_queue::{StreamExt as _};
+
+let (send_one, recv_one) = oneshot::channel();
+let (send_two, recv_two) = oneshot::channel();
+
+let stream_of_futures = stream::iter(
+    vec![
+        (1, Some("group1"), recv_one),
+        (2, None, recv_two),
+    ],
+);
+let mut queue = stream_of_futures.future_queue_grouped(10, [("group1", 5)]);
 
 send_two.send("hello")?;
 assert_eq!(queue.next().await, Some(Ok("hello")));
