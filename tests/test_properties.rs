@@ -6,6 +6,7 @@ use futures::{stream, StreamExt as _};
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 use std::time::Duration;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 #[derive(Clone, Debug, Arbitrary)]
 struct TestState {
@@ -18,6 +19,8 @@ struct TestState {
 #[derive(Copy, Clone, Debug, Arbitrary)]
 struct TestFutureDesc {
     #[proptest(strategy = "duration_strategy()")]
+    start_delay: Duration,
+    #[proptest(strategy = "duration_strategy()")]
     delay: Duration,
     #[proptest(strategy = "0usize..8")]
     weight: usize,
@@ -28,10 +31,23 @@ fn duration_strategy() -> BoxedStrategy<Duration> {
     (0u64..1000).prop_map(Duration::from_millis).boxed()
 }
 
+#[test]
+fn test_examples() {
+    let state = TestState {
+        max_weight: 1,
+        future_descriptions: vec![TestFutureDesc {
+            start_delay: Duration::ZERO,
+            delay: Duration::ZERO,
+            weight: 0,
+        }],
+    };
+    test_future_queue_impl(state);
+}
+
 proptest! {
     #[test]
     fn proptest_future_queue(state: TestState) {
-        proptest_future_queue_impl(state)
+        test_future_queue_impl(state)
     }
 }
 
@@ -41,33 +57,48 @@ enum FutureEvent {
     Finished(usize, TestFutureDesc),
 }
 
-fn proptest_future_queue_impl(state: TestState) {
+fn test_future_queue_impl(state: TestState) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .start_paused(true)
         .build()
         .expect("tokio builder succeeded");
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (future_sender, future_receiver) = tokio::sync::mpsc::unbounded_channel();
     let futures = state
         .future_descriptions
         .iter()
         .enumerate()
-        .map(|(id, desc)| {
+        .map(move |(id, desc)| {
+            let desc = *desc;
             let sender = sender.clone();
-            // For each description, create a future.
-            let delay_fut = async move {
-                // Send the fact that this future started to the mpsc queue.
-                sender
-                    .send(FutureEvent::Started(id, *desc))
-                    .expect("receiver held open by loop");
-                tokio::time::sleep(desc.delay).await;
-                sender
-                    .send(FutureEvent::Finished(id, *desc))
-                    .expect("receiver held open by loop");
-            };
-            (desc.weight, delay_fut)
-        });
-    let stream = stream::iter(futures);
+            let future_sender = future_sender.clone();
+            async move {
+                // First, sleep for this long.
+                tokio::time::sleep(desc.start_delay).await;
+                // For each description, create a future.
+                let delay_fut = async move {
+                    // Send the fact that this future started to the mpsc queue.
+                    sender
+                        .send(FutureEvent::Started(id, desc))
+                        .expect("receiver held open by loop");
+                    tokio::time::sleep(desc.delay).await;
+                    sender
+                        .send(FutureEvent::Finished(id, desc))
+                        .expect("receiver held open by loop");
+                };
+                // Errors should never occur here.
+                if let Err(err) = future_sender.send((desc.weight, delay_fut)) {
+                    panic!("future_receiver held open by loop: {}", err);
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    let combined_future = stream::iter(futures).buffer_unordered(1).collect::<()>();
+    runtime.spawn(combined_future);
+
+    // We're going to use future_receiver as a stream.
+    let stream = UnboundedReceiverStream::new(future_receiver);
 
     let mut completed_map = vec![false; state.future_descriptions.len()];
     let mut last_started_id: Option<usize> = None;
@@ -76,13 +107,14 @@ fn proptest_future_queue_impl(state: TestState) {
     runtime.block_on(async move {
         // Record values that have been completed in this map.
         let mut stream = stream.future_queue(state.max_weight);
+        let mut receiver_done = false;
         loop {
             tokio::select! {
                 // biased ensures that the receiver is drained before the stream is polled. Without
                 // it, it's possible that we fail to record the completion of some futures in status_map.
                 biased;
 
-                recv = receiver.recv() => {
+                recv = receiver.recv(), if !receiver_done => {
                     match recv {
                         Some(FutureEvent::Started(id, desc)) => {
                             // last_started_id must be 1 less than id.
@@ -106,6 +138,7 @@ fn proptest_future_queue_impl(state: TestState) {
                         }
                         None => {
                             // All futures finished -- going to check for completion in stream.next() below.
+                            receiver_done = true;
                         }
                     }
                 }
