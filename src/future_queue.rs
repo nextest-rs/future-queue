@@ -6,7 +6,6 @@ use futures_util::{
     Future, Stream, StreamExt as _,
 };
 use pin_project_lite::pin_project;
-use private::WeightedFuture;
 use std::{
     fmt,
     pin::Pin,
@@ -167,25 +166,31 @@ where
     }
 }
 
+/// A trait for types which can be converted into a `Future` and a weight.
+///
+/// Provided in case it's necessary. This trait is only implemented for `(usize, impl Future)`.
+pub trait WeightedFuture: private::Sealed {
+    type Future: Future;
+
+    /// Turns this trait into its components.
+    fn into_components(self) -> (usize, Self::Future);
+}
+
 mod private {
-    use futures_util::Future;
+    pub trait Sealed {}
+}
 
-    pub trait WeightedFuture {
-        type Future: Future;
+impl<Fut> private::Sealed for (usize, Fut) where Fut: Future {}
 
-        fn into_components(self) -> (usize, Self::Future);
-    }
+impl<Fut> WeightedFuture for (usize, Fut)
+where
+    Fut: Future,
+{
+    type Future = Fut;
 
-    impl<Fut> WeightedFuture for (usize, Fut)
-    where
-        Fut: Future,
-    {
-        type Future = Fut;
-
-        #[inline]
-        fn into_components(self) -> (usize, Self::Future) {
-            self
-        }
+    #[inline]
+    fn into_components(self) -> (usize, Self::Future) {
+        self
     }
 }
 

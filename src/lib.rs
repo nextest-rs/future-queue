@@ -98,7 +98,15 @@
 
 mod future_queue;
 
-pub use future_queue::FutureQueue;
+pub use crate::future_queue::FutureQueue;
+
+/// Traits to aid in type definitions.
+///
+/// These traits are normally not required by end-user code, but may be necessary for some generic
+/// code.
+pub mod traits {
+    pub use crate::future_queue::WeightedFuture;
+}
 
 use futures_util::{Future, Stream};
 
