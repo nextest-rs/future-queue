@@ -1,13 +1,13 @@
-# buffer-unordered-weighted
+# future-queue
 
-[![buffer-unordered-weighted on crates.io](https://img.shields.io/crates/v/buffer-unordered-weighted)](https://crates.io/crates/buffer-unordered-weighted)
-[![Documentation (latest release)](https://img.shields.io/badge/docs-latest-brightgreen.svg)](https://docs.rs/buffer-unordered-weighted/)
-[![Documentation (main)](https://img.shields.io/badge/docs-main-purple)](https://nextest-rs.github.io/buffer-unordered-weighted/rustdoc/buffer_unordered_weighted)
+[![future-queue on crates.io](https://img.shields.io/crates/v/future-queue)](https://crates.io/crates/future-queue)
+[![Documentation (latest release)](https://img.shields.io/badge/docs-latest-brightgreen.svg)](https://docs.rs/future-queue/)
+[![Documentation (main)](https://img.shields.io/badge/docs-main-purple)](https://nextest-rs.github.io/future-queue/rustdoc/future_queue)
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache-green.svg)](LICENSE-APACHE)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE-MIT)
 
-`buffer_unordered_weighted` is a variant of
+`future_queue` is a variant of
 [`buffer_unordered`](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html#method.buffer_unordered),
 where each future can be assigned a different weight.
 
@@ -42,7 +42,7 @@ those tests should be run simultaneously.
 
 ## About this crate
 
-This crate provides an adaptor on streams called `buffer_unordered_weighted`, which can run
+This crate provides an adaptor on streams called `future_queue`, which can run
 several futures simultaneously, limiting the concurrency to a maximum *weight*.
 
 Rather than taking a stream of futures, this adaptor takes a stream of `(usize, future)` pairs,
@@ -64,27 +64,27 @@ the future.
 
 The weight of a future can be zero, in which case it doesn't count towards the maximum weight.
 
-If all weights are 1, then `buffer_unordered_weighted` is exactly the same as `buffer_unordered`.
+If all weights are 1, then `future_queue` is exactly the same as `buffer_unordered`.
 
 ## Examples
 
 ```rust
 use futures::{channel::oneshot, stream, StreamExt as _};
-use buffer_unordered_weighted::{StreamExt as _};
+use future_queue::{StreamExt as _};
 
 let (send_one, recv_one) = oneshot::channel();
 let (send_two, recv_two) = oneshot::channel();
 
 let stream_of_futures = stream::iter(vec![(1, recv_one), (2, recv_two)]);
-let mut buffered = stream_of_futures.buffer_unordered_weighted(10);
+let mut queue = stream_of_futures.future_queue(10);
 
 send_two.send("hello")?;
-assert_eq!(buffered.next().await, Some(Ok("hello")));
+assert_eq!(queue.next().await, Some(Ok("hello")));
 
 send_one.send("world")?;
-assert_eq!(buffered.next().await, Some(Ok("world")));
+assert_eq!(queue.next().await, Some(Ok("world")));
 
-assert_eq!(buffered.next().await, None);
+assert_eq!(queue.next().await, None);
 ```
 
 ## Minimum supported Rust version (MSRV)
@@ -95,6 +95,10 @@ The MSRV will likely not change in the medium term, but while this crate is a pr
 (0.x.x) it may have its MSRV bumped in a patch release. Once this crate has reached 1.x, any
 MSRV bump will be accompanied with a new minor version.
 
+## Notes
+
+This crate used to be called `buffer-unordered-weighted`. It was renamed to `future-queue` to be
+more descriptive about what the crate does rather than how it's implemented.
 
 ## Contributing
 

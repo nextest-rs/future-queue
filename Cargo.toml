@@ -1,11 +1,11 @@
 [package]
-name = "buffer-unordered-weighted"
+name = "future-queue"
 version = "0.1.2"
-description = "Stream::buffer_unordered where each future can have a different weight."
+description = "Adapters to manage a queue of futures, where each future can have a different weight."
 edition = "2021"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/nextest-rs/buffer-unordered-weighted"
+repository = "https://github.com/nextest-rs/future-queue"
 resolver = "2"
 rust-version = "1.56"
 categories = ["asynchronous"]

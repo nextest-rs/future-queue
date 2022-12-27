@@ -1,8 +1,8 @@
 # {{crate}}
 
-[![buffer-unordered-weighted on crates.io](https://img.shields.io/crates/v/buffer-unordered-weighted)](https://crates.io/crates/buffer-unordered-weighted)
-[![Documentation (latest release)](https://img.shields.io/badge/docs-latest-brightgreen.svg)](https://docs.rs/buffer-unordered-weighted/)
-[![Documentation (main)](https://img.shields.io/badge/docs-main-purple)](https://nextest-rs.github.io/buffer-unordered-weighted/rustdoc/buffer_unordered_weighted)
+[![future-queue on crates.io](https://img.shields.io/crates/v/future-queue)](https://crates.io/crates/future-queue)
+[![Documentation (latest release)](https://img.shields.io/badge/docs-latest-brightgreen.svg)](https://docs.rs/future-queue/)
+[![Documentation (main)](https://img.shields.io/badge/docs-main-purple)](https://nextest-rs.github.io/future-queue/rustdoc/future_queue)
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-Apache-green.svg)](LICENSE-APACHE)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE-MIT)

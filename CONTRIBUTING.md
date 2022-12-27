@@ -28,6 +28,6 @@ able to be built and passes all checks performed by CI.
 
 ## License
 
-By contributing to `buffer-unordered-weighted`, you agree that your contributions will be
+By contributing to `future-queue`, you agree that your contributions will be
 dual-licensed under the terms of the [`LICENSE-MIT`](LICENSE-MIT) and
 [`LICENSE-APACHE`](LICENSE-APACHE) files in the root directory of this source tree.

@@ -1,7 +1,7 @@
-// Copyright (c) The buffer-unordered-weighted Contributors
+// Copyright (c) The future-queue Contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use buffer_unordered_weighted::StreamExt as _;
+use future_queue::StreamExt as _;
 use futures::{stream, StreamExt as _};
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
@@ -30,8 +30,8 @@ fn duration_strategy() -> BoxedStrategy<Duration> {
 
 proptest! {
     #[test]
-    fn proptest_buffer_unordered(state: TestState) {
-        proptest_buffer_unordered_impl(state)
+    fn proptest_future_queue(state: TestState) {
+        proptest_future_queue_impl(state)
     }
 }
 
@@ -41,7 +41,7 @@ enum FutureEvent {
     Finished(usize, TestFutureDesc),
 }
 
-fn proptest_buffer_unordered_impl(state: TestState) {
+fn proptest_future_queue_impl(state: TestState) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .start_paused(true)
@@ -75,7 +75,7 @@ fn proptest_buffer_unordered_impl(state: TestState) {
 
     runtime.block_on(async move {
         // Record values that have been completed in this map.
-        let mut stream = stream.buffer_unordered_weighted(state.max_weight);
+        let mut stream = stream.future_queue(state.max_weight);
         loop {
             tokio::select! {
                 // biased ensures that the receiver is drained before the stream is polled. Without

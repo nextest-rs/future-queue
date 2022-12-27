@@ -1,7 +1,7 @@
-// Copyright (c) The buffer-unordered-weighted Contributors
+// Copyright (c) The future-queue Contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! `buffer_unordered_weighted` is a variant of
+//! `future_queue` is a variant of
 //! [`buffer_unordered`](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html#method.buffer_unordered),
 //! where each future can be assigned a different weight.
 //!
@@ -36,7 +36,7 @@
 //!
 //! # About this crate
 //!
-//! This crate provides an adaptor on streams called `buffer_unordered_weighted`, which can run
+//! This crate provides an adaptor on streams called `future_queue`, which can run
 //! several futures simultaneously, limiting the concurrency to a maximum *weight*.
 //!
 //! Rather than taking a stream of futures, this adaptor takes a stream of `(usize, future)` pairs,
@@ -58,28 +58,28 @@
 //!
 //! The weight of a future can be zero, in which case it doesn't count towards the maximum weight.
 //!
-//! If all weights are 1, then `buffer_unordered_weighted` is exactly the same as `buffer_unordered`.
+//! If all weights are 1, then `future_queue` is exactly the same as `buffer_unordered`.
 //!
 //! # Examples
 //!
 //! ```
 //! # futures::executor::block_on(async {
 //! use futures::{channel::oneshot, stream, StreamExt as _};
-//! use buffer_unordered_weighted::{StreamExt as _};
+//! use future_queue::{StreamExt as _};
 //!
 //! let (send_one, recv_one) = oneshot::channel();
 //! let (send_two, recv_two) = oneshot::channel();
 //!
 //! let stream_of_futures = stream::iter(vec![(1, recv_one), (2, recv_two)]);
-//! let mut buffered = stream_of_futures.buffer_unordered_weighted(10);
+//! let mut queue = stream_of_futures.future_queue(10);
 //!
 //! send_two.send("hello")?;
-//! assert_eq!(buffered.next().await, Some(Ok("hello")));
+//! assert_eq!(queue.next().await, Some(Ok("hello")));
 //!
 //! send_one.send("world")?;
-//! assert_eq!(buffered.next().await, Some(Ok("world")));
+//! assert_eq!(queue.next().await, Some(Ok("world")));
 //!
-//! assert_eq!(buffered.next().await, None);
+//! assert_eq!(queue.next().await, None);
 //! # Ok::<(), &'static str>(()) }).unwrap();
 //! ```
 //!
@@ -90,6 +90,11 @@
 //! The MSRV will likely not change in the medium term, but while this crate is a pre-release
 //! (0.x.x) it may have its MSRV bumped in a patch release. Once this crate has reached 1.x, any
 //! MSRV bump will be accompanied with a new minor version.
+//!
+//! # Notes
+//!
+//! This crate used to be called `buffer-unordered-weighted`. It was renamed to `future-queue` to be
+//! more descriptive about what the crate does rather than how it's implemented.
 
 mod future_queue;
 
@@ -98,7 +103,7 @@ use futures_util::{Future, Stream};
 impl<T: ?Sized> StreamExt for T where T: Stream {}
 
 /// An extension trait for `Stream`s that provides
-/// [`buffer_unordered_weighted`](StreamExt::buffer_unordered_weighted).
+/// [`future_queue`](StreamExt::future_queue).
 pub trait StreamExt: Stream {
     /// An adaptor for creating a buffered list of pending futures (unordered), where
     /// each future has a different weight.
@@ -121,17 +126,12 @@ pub trait StreamExt: Stream {
     /// # Examples
     ///
     /// See [the crate documentation](crate#examples) for an example.
-    fn buffer_unordered_weighted<Fut>(
-        self,
-        max_weight: usize,
-    ) -> future_queue::BufferUnorderedWeighted<Self>
+    fn future_queue<Fut>(self, max_weight: usize) -> future_queue::FutureQueue<Self>
     where
         Self: Sized + Stream<Item = (usize, Fut)>,
         Fut: Future,
     {
-        assert_stream::<Fut::Output, _>(future_queue::BufferUnorderedWeighted::new(
-            self, max_weight,
-        ))
+        assert_stream::<Fut::Output, _>(future_queue::FutureQueue::new(self, max_weight))
     }
 }
 

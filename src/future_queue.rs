@@ -1,4 +1,4 @@
-// Copyright (c) The buffer-unordered-weighted Contributors
+// Copyright (c) The future-queue Contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use futures_util::{
@@ -14,9 +14,9 @@ use std::{
 };
 
 pin_project! {
-    /// Stream for the [`buffer_unordered_weighted`](StreamExt::buffer_unordered_weighted) method.
+    /// Stream for the [`future_queue`](StreamExt::future_queue) method.
     #[must_use = "streams do nothing unless polled"]
-    pub struct BufferUnorderedWeighted<St>
+    pub struct FutureQueue<St>
     where
         St: Stream,
         St::Item: WeightedFuture,
@@ -29,13 +29,13 @@ pin_project! {
     }
 }
 
-impl<St> fmt::Debug for BufferUnorderedWeighted<St>
+impl<St> fmt::Debug for FutureQueue<St>
 where
     St: Stream + fmt::Debug,
     St::Item: WeightedFuture,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BufferUnorderedWeighted")
+        f.debug_struct("FutureQueue")
             .field("stream", &self.stream)
             .field("in_progress_queue", &self.in_progress_queue)
             .field("max_weight", &self.max_weight)
@@ -44,7 +44,7 @@ where
     }
 }
 
-impl<St> BufferUnorderedWeighted<St>
+impl<St> FutureQueue<St>
 where
     St: Stream,
     St::Item: WeightedFuture,
@@ -101,7 +101,7 @@ where
     }
 }
 
-impl<St> Stream for BufferUnorderedWeighted<St>
+impl<St> Stream for FutureQueue<St>
 where
     St: Stream,
     St::Item: WeightedFuture,
@@ -120,9 +120,8 @@ where
                     *this.current_weight =
                         this.current_weight.checked_add(weight).unwrap_or_else(|| {
                             panic!(
-                                "buffer_unordered_weighted: added weight {} to current {}, overflowed",
-                                weight,
-                                this.current_weight,
+                                "future_queue: added weight {} to current {}, overflowed",
+                                weight, this.current_weight,
                             )
                         });
                     this.in_progress_queue
@@ -136,13 +135,13 @@ where
         match this.in_progress_queue.poll_next_unpin(cx) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(Some((weight, output))) => {
-                *this.current_weight = this.current_weight.checked_sub(weight).unwrap_or_else(|| {
-                    panic!(
-                        "buffer_unordered_weighted: subtracted weight {} from current {}, overflowed",
-                        weight,
-                        this.current_weight,
-                    )
-                });
+                *this.current_weight =
+                    this.current_weight.checked_sub(weight).unwrap_or_else(|| {
+                        panic!(
+                            "future_queue: subtracted weight {} from current {}, overflowed",
+                            weight, this.current_weight,
+                        )
+                    });
                 return Poll::Ready(Some(output));
             }
             Poll::Ready(None) => {}
