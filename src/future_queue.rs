@@ -14,7 +14,7 @@ use std::{
 };
 
 pin_project! {
-    /// Stream for the [`future_queue`](StreamExt::future_queue) method.
+    /// Stream for the [`future_queue`](crate::StreamExt::future_queue) method.
     #[must_use = "streams do nothing unless polled"]
     pub struct FutureQueue<St>
     where

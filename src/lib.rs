@@ -98,6 +98,8 @@
 
 mod future_queue;
 
+pub use future_queue::FutureQueue;
+
 use futures_util::{Future, Stream};
 
 impl<T: ?Sized> StreamExt for T where T: Stream {}
@@ -126,12 +128,12 @@ pub trait StreamExt: Stream {
     /// # Examples
     ///
     /// See [the crate documentation](crate#examples) for an example.
-    fn future_queue<Fut>(self, max_weight: usize) -> future_queue::FutureQueue<Self>
+    fn future_queue<Fut>(self, max_weight: usize) -> FutureQueue<Self>
     where
         Self: Sized + Stream<Item = (usize, Fut)>,
         Fut: Future,
     {
-        assert_stream::<Fut::Output, _>(future_queue::FutureQueue::new(self, max_weight))
+        assert_stream::<Fut::Output, _>(FutureQueue::new(self, max_weight))
     }
 }
 
