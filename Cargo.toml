@@ -12,6 +12,7 @@ categories = ["asynchronous"]
 keywords = ["stream", "futures", "async", "buffer_unordered"]
 
 [dependencies]
+fnv = "1.0.7"
 futures-util = { version = "0.3.25", default-features = false, features = ["std"] }
 pin-project-lite = "0.2.9"
 

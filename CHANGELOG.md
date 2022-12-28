@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2022-12-27
+
+## Changed
+
+- Internal change: switch to `FnvHashMap` for `future_queue_grouped`.
+
 ## [0.2.0] - 2022-12-27
 
 ## Added
@@ -23,6 +29,7 @@
 
 - Initial release.
 
+[0.2.1]: https://github.com/nextest-rs/future-queue/releases/tag/0.2.1
 [0.2.0]: https://github.com/nextest-rs/future-queue/releases/tag/0.2.0
 [0.1.2]: https://github.com/nextest-rs/future-queue/releases/tag/0.1.2
 [0.1.1]: https://github.com/nextest-rs/future-queue/releases/tag/0.1.1

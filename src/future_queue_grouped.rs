@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use crate::peekable_fused::PeekableFused;
+use fnv::FnvHashMap;
 use futures_util::{
     ready,
     stream::{Fuse, FusedStream, FuturesUnordered},
@@ -10,7 +11,7 @@ use futures_util::{
 use pin_project_lite::pin_project;
 use std::{
     borrow::Borrow,
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     fmt,
     hash::Hash,
     pin::Pin,
@@ -347,7 +348,7 @@ where
 
 #[derive(Debug)]
 struct GroupStore<Q, K, Fut> {
-    group_data: HashMap<K, GroupData<Q, Fut>>,
+    group_data: FnvHashMap<K, GroupData<Q, Fut>>,
 }
 
 impl<Q, K, Fut> GroupStore<Q, K, Fut>
