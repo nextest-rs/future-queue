@@ -8,6 +8,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE-MIT)
 
 `future_queue` provides ways to run several futures:
+
 * concurrently
 * in the order they're spawned
 * with global limits
@@ -97,6 +98,11 @@ The [`future_queue_grouped`](StreamExt::future_queue_grouped) adaptor is like `f
 except it is possible to specify an optional *group* for each future. Each group has a maximum
 weight, and a future will only be scheduled if both the maximum weight and the group weight
 aren't exceeded.
+
+The adaptor is as fair as possible under the given constraints: it will schedule futures in
+the order they're returned by the stream, without doing any reordering based on weight. When
+a future from a group completes, queued up futures in this group will be preferentially
+scheduled before any other futures from the provided stream.
 
 The current weight for groups may exceed the maximum weight, similar to `future_queue`.
 
