@@ -6,6 +6,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/nextest-rs/future-queue"
+documentation = "https://docs.rs/future-queue"
 resolver = "2"
 rust-version = "1.56"
 categories = ["asynchronous"]
