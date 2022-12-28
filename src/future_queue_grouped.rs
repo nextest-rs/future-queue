@@ -166,12 +166,16 @@ where
 
         match ready!(this.in_progress_queue.poll_next_unpin(cx)) {
             Some((weight, id, output)) => {
-                *this.current_global_weight = this.current_global_weight.checked_sub(weight).unwrap_or_else(|| {
-                    panic!(
-                        "future_queue_grouped: subtracted weight {weight} from current {}, overflowed",
+                *this.current_global_weight = this
+                    .current_global_weight
+                    .checked_sub(weight)
+                    .unwrap_or_else(|| {
+                        panic!(
+                        "future_queue_grouped: subtracted weight {} from current {}, overflowed",
+                        weight,
                         this.current_global_weight,
                     )
-                });
+                    });
 
                 let mut any_queued = false;
 
@@ -183,14 +187,21 @@ where
                     while data.current_weight < data.max_weight
                         && this.current_global_weight < this.max_global_weight
                     {
-                        let Some((weight, id, future)) = data.queued.pop_front() else { break };
+                        let (weight, id, future) = match data.queued.pop_front() {
+                            Some(x) => x,
+                            None => break,
+                        };
                         data.add_weight(&id, weight);
-                        *this.current_global_weight = this.current_global_weight.checked_add(weight).unwrap_or_else(|| {
-                            panic!(
-                                "future_queue_grouped: added weight {weight} to current {}, overflowed",
+                        *this.current_global_weight = this
+                            .current_global_weight
+                            .checked_add(weight)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                "future_queue_grouped: added weight {} to current {}, overflowed",
+                                weight,
                                 this.current_global_weight,
                             )
-                        });
+                            });
                         this.in_progress_queue
                             .as_mut()
                             .get_pin_mut()
@@ -240,7 +251,8 @@ where
                             data.add_weight(&id, weight);
                             *this.current_global_weight = this.current_global_weight.checked_add(weight).unwrap_or_else(|| {
                                 panic!(
-                                    "future_queue_grouped: added weight {weight} to current {}, overflowed",
+                                    "future_queue_grouped: added weight {} to current {}, overflowed",
+                                    weight,
                                     this.current_global_weight,
                                 )
                             });
@@ -276,7 +288,7 @@ where
         if any_queued {
             // Start any futures that were just queued up. If this returns Pending, then that's fine --
             // the task will be scheduled on the waker.
-            _ = this.in_progress_queue.as_mut().poll_peek(cx);
+            let _ = this.in_progress_queue.as_mut().poll_peek(cx);
         }
 
         if let Some(output) = return_output {
@@ -310,7 +322,7 @@ where
                     if any_queued {
                         // It's possible that poll_pop_in_progress might have added more futures to the queue.
                         let this = self.project();
-                        _ = this.in_progress_queue.poll_peek(cx);
+                        let _ = this.in_progress_queue.poll_peek(cx);
                     }
                     Poll::Ready(output)
                 }
@@ -368,7 +380,8 @@ where
             self.group_data.get_mut(id).unwrap()
         } else {
             panic!(
-                "unknown semaphore ID: {id:?} (known IDs: {:?})",
+                "unknown semaphore ID: {:?} (known IDs: {:?})",
+                id,
                 self.group_data.keys()
             );
         }
@@ -391,8 +404,8 @@ impl<Q: fmt::Debug, Fut> GroupData<Q, Fut> {
     fn add_weight(&mut self, id: &Q, weight: usize) {
         self.current_weight = self.current_weight.checked_add(weight).unwrap_or_else(|| {
             panic!(
-                "future_queue_grouped: for id `{id:?}`, added weight {weight} to current {}, overflowed",
-                self.current_weight,
+                "future_queue_grouped: for id `{:?}`, added weight {} to current {}, overflowed",
+                id, weight, self.current_weight,
             )
         });
     }
@@ -400,8 +413,8 @@ impl<Q: fmt::Debug, Fut> GroupData<Q, Fut> {
     fn sub_weight(&mut self, id: &Q, weight: usize) {
         self.current_weight = self.current_weight.checked_sub(weight).unwrap_or_else(|| {
             panic!(
-                "future_queue_grouped: for id `{id:?}`, subtracted weight {weight} from current {}, underflowed",
-                self.current_weight,
+                "future_queue_grouped: for id `{:?}`, sub weight {} from current {}, underflowed",
+                id, weight, self.current_weight,
             )
         });
     }
