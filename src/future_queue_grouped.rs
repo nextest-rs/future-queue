@@ -28,19 +28,19 @@ pin_project! {
         #[pin]
         stream: Fuse<St>,
         #[pin]
-        in_progress_queue: PeekableFused<
-            FuturesUnordered<
-                FutureWithGW<
-                    <St::Item as GroupedWeightedFuture>::Future,
-                    <St::Item as GroupedWeightedFuture>::Q
-                >
-            >
-        >,
+        in_progress_queue: PeekableFused<InProgressQueue<St>>,
         max_global_weight: usize,
         current_global_weight: usize,
         group_store: GroupStore<<St::Item as GroupedWeightedFuture>::Q, K, <St::Item as GroupedWeightedFuture>::Future>,
     }
 }
+
+type InProgressQueue<St> = FuturesUnordered<
+    FutureWithGW<
+        <<St as Stream>::Item as GroupedWeightedFuture>::Future,
+        <<St as Stream>::Item as GroupedWeightedFuture>::Q,
+    >,
+>;
 
 impl<St, K> fmt::Debug for FutureQueueGrouped<St, K>
 where
@@ -155,6 +155,7 @@ where
     // ---
 
     // This returns true if any new futures were added to the in_progress_queue.
+    #[allow(clippy::type_complexity)]
     fn poll_pop_in_progress(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
