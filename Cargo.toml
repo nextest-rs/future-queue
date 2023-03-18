@@ -1,6 +1,6 @@
 [package]
 name = "future-queue"
-version = "0.2.2"
+version = "0.3.0"
 description = "Adapters to manage a queue of futures, where each future can have a different weight."
 edition = "2021"
 license = "MIT OR Apache-2.0"
