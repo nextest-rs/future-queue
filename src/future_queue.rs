@@ -1,6 +1,7 @@
 // Copyright (c) The future-queue Contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use crate::{global_weight::GlobalWeight, peekable_fused::PeekableFused};
 use futures_util::{
     stream::{Fuse, FuturesUnordered},
     Future, Stream, StreamExt as _,
@@ -21,10 +22,9 @@ pin_project! {
         St::Item: WeightedFuture,
      {
         #[pin]
-        stream: Fuse<St>,
+        stream: PeekableFused<Fuse<St>>,
         in_progress_queue: FuturesUnordered<FutureWithWeight<<St::Item as WeightedFuture>::Future>>,
-        max_weight: usize,
-        current_weight: usize,
+        global_weight: GlobalWeight,
     }
 }
 
@@ -37,8 +37,7 @@ where
         f.debug_struct("FutureQueue")
             .field("stream", &self.stream)
             .field("in_progress_queue", &self.in_progress_queue)
-            .field("max_weight", &self.max_weight)
-            .field("current_weight", &self.current_weight)
+            .field("global_weight", &self.global_weight)
             .finish()
     }
 }
@@ -50,27 +49,26 @@ where
 {
     pub(crate) fn new(stream: St, max_weight: usize) -> Self {
         Self {
-            stream: stream.fuse(),
+            stream: PeekableFused::new(stream.fuse()),
             in_progress_queue: FuturesUnordered::new(),
-            max_weight,
-            current_weight: 0,
+            global_weight: GlobalWeight::new(max_weight),
         }
     }
 
     /// Returns the maximum weight of futures allowed to be run by this adaptor.
     pub fn max_weight(&self) -> usize {
-        self.max_weight
+        self.global_weight.max()
     }
 
     /// Returns the currently running weight of futures.
     pub fn current_weight(&self) -> usize {
-        self.current_weight
+        self.global_weight.current()
     }
 
     /// Acquires a reference to the underlying sink or stream that this combinator is
     /// pulling from.
     pub fn get_ref(&self) -> &St {
-        self.stream.get_ref()
+        self.stream.get_ref().get_ref()
     }
 
     /// Acquires a mutable reference to the underlying sink or stream that this
@@ -79,7 +77,7 @@ where
     /// Note that care must be taken to avoid tampering with the state of the
     /// sink or stream which may otherwise confuse this combinator.
     pub fn get_mut(&mut self) -> &mut St {
-        self.stream.get_mut()
+        self.stream.get_mut().get_mut()
     }
 
     /// Acquires a pinned mutable reference to the underlying sink or stream that this
@@ -88,7 +86,7 @@ where
     /// Note that care must be taken to avoid tampering with the state of the
     /// sink or stream which may otherwise confuse this combinator.
     pub fn get_pin_mut(self: Pin<&mut Self>) -> core::pin::Pin<&mut St> {
-        self.project().stream.get_pin_mut()
+        self.project().stream.get_pin_mut().get_pin_mut()
     }
 
     /// Consumes this combinator, returning the underlying sink or stream.
@@ -96,7 +94,7 @@ where
     /// Note that this may discard intermediate state of this combinator, so
     /// care should be taken to avoid losing resources when this is called.
     pub fn into_inner(self) -> St {
-        self.stream.into_inner()
+        self.stream.into_inner().into_inner()
     }
 }
 
@@ -112,35 +110,27 @@ where
 
         // First up, try to spawn off as many futures as possible by filling up
         // our queue of futures.
-        while *this.current_weight < *this.max_weight {
-            match this.stream.as_mut().poll_next(cx) {
-                Poll::Ready(Some(weighted_future)) => {
-                    let (weight, future) = weighted_future.into_components();
-                    *this.current_weight =
-                        this.current_weight.checked_add(weight).unwrap_or_else(|| {
-                            panic!(
-                                "future_queue: added weight {} to current {}, overflowed",
-                                weight, this.current_weight,
-                            )
-                        });
-                    this.in_progress_queue
-                        .push(FutureWithWeight::new(weight, future));
-                }
-                Poll::Ready(None) | Poll::Pending => break,
+        while let Poll::Ready(Some(weighted_future)) = this.stream.as_mut().poll_peek(cx) {
+            if !this.global_weight.has_space_for(weighted_future.weight()) {
+                // Global limits would be exceeded, break out of the loop. Consider this
+                // item next time.
+                break;
             }
+
+            let (weight, future) = match this.stream.as_mut().poll_next(cx) {
+                Poll::Ready(Some(weighted_future)) => weighted_future.into_components(),
+                _ => unreachable!("we just peeked at this item"),
+            };
+            this.global_weight.add_weight(weight);
+            this.in_progress_queue
+                .push(FutureWithWeight::new(weight, future));
         }
 
-        // Attempt to pull the next value from the in_progress_queue
+        // Attempt to pull the next value from the in_progress_queue.
         match this.in_progress_queue.poll_next_unpin(cx) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(Some((weight, output))) => {
-                *this.current_weight =
-                    this.current_weight.checked_sub(weight).unwrap_or_else(|| {
-                        panic!(
-                            "future_queue: subtracted weight {} from current {}, overflowed",
-                            weight, this.current_weight,
-                        )
-                    });
+                this.global_weight.sub_weight(weight);
                 return Poll::Ready(Some(output));
             }
             Poll::Ready(None) => {}
@@ -173,6 +163,9 @@ pub trait WeightedFuture: private::Sealed {
     /// The associated `Future` type.
     type Future: Future;
 
+    /// The weight of the future.
+    fn weight(&self) -> usize;
+
     /// Turns self into its components.
     fn into_components(self) -> (usize, Self::Future);
 }
@@ -188,6 +181,11 @@ where
     Fut: Future,
 {
     type Future = Fut;
+
+    #[inline]
+    fn weight(&self) -> usize {
+        self.0
+    }
 
     #[inline]
     fn into_components(self) -> (usize, Self::Future) {

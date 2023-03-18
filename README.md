@@ -57,15 +57,15 @@ limiting the concurrency to a maximum *weight*.
 
 Rather than taking a stream of futures, this adaptor takes a stream of `(usize, future)` pairs,
 where the `usize` indicates the weight of each future. This adaptor will schedule and buffer
-futures to be run until the maximum weight is exceeded. Once that happens, this adaptor will
-wait until some of the currently executing futures complete, and the current weight of running
-futures drops below the maximum weight, before scheduling new futures.
+futures to be run until queueing the next future will exceed the maximum weight.
 
-Note that in some cases, the current weight may exceed the maximum weight. For example:
+* The maximum weight is never exceeded while futures are being run.
+* If the weight of an individual future is greater than the maximum weight, its weight will be
+  set to the maximum weight.
 
-* Let's say the maximum weight is **24**, and the current weight is **20**.
-* If the next future has weight **6**, then it will be scheduled and the current weight will become **26**.
-* No new futures will be scheduled until the current weight falls to **23** or below.
+Once all possible futures are scheduled, this adaptor will wait until some of the currently
+executing futures complete, and the current weight of running futures drops below the maximum
+weight, before scheduling new futures.
 
 The weight of a future can be zero, in which case it doesn't count towards the maximum weight.
 
@@ -104,7 +104,13 @@ the order they're returned by the stream, without doing any reordering based on 
 a future from a group completes, queued up futures in this group will be preferentially
 scheduled before any other futures from the provided stream.
 
-The current weight for groups may exceed the maximum weight, similar to `future_queue`.
+Like with [`future_queue`](StreamExt::future_queue):
+
+* The maximum global and group weights is never exceeded while futures are being run.
+* While accounting against global weights, if the weight of an individual future is greater than
+  the maximum weight, its weight will be set to the maximum weight.
+* *If a future belongs to a group:* While accounting against the group weight, if its weight is
+  greater than the maximum group weight, its weight will be set to the maximum group weight.
 
 #### Examples
 

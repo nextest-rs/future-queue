@@ -77,6 +77,11 @@ impl<St: FusedStream> PeekableFused<St> {
         self.stream
     }
 
+    /// Returns whether the combinator is done.
+    pub fn is_done(&self) -> bool {
+        self.stream.is_terminated()
+    }
+
     // TODO: implement the rest of the API if necessary.
 
     /// Peek retrieves a reference to the next item in the stream.

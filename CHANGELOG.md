@@ -1,8 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Changed definitions of `future_queue` and `future_queue_grouped` such that weights can no longer be
+  exceeded. This enables certain additional use cases.
+
 ## [0.2.2] - 2022-12-27
 
-## Added
+### Added
 
 - Added documentation link to Cargo.toml metadata.
 

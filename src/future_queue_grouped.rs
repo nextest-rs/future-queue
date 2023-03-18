@@ -1,7 +1,7 @@
 // Copyright (c) The buffer-unordered-weighted Contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use crate::peekable_fused::PeekableFused;
+use crate::{global_weight::GlobalWeight, peekable_fused::PeekableFused};
 use fnv::FnvHashMap;
 use futures_util::{
     ready,
@@ -27,11 +27,10 @@ pin_project! {
         St::Item: GroupedWeightedFuture,
      {
         #[pin]
-        stream: Fuse<St>,
+        stream: PeekableFused<Fuse<St>>,
         #[pin]
         in_progress_queue: PeekableFused<InProgressQueue<St>>,
-        max_global_weight: usize,
-        current_global_weight: usize,
+        global_weight: GlobalWeight,
         group_store: GroupStore<<St::Item as GroupedWeightedFuture>::Q, K, <St::Item as GroupedWeightedFuture>::Future>,
     }
 }
@@ -56,8 +55,7 @@ where
         f.debug_struct("FutureQueueGrouped")
             .field("stream", &self.stream)
             .field("in_progress_queue", &self.in_progress_queue)
-            .field("max_global_weight", &self.max_global_weight)
-            .field("current_global_weight", &self.current_global_weight)
+            .field("global_weight", &self.global_weight)
             .field("group_store", &self.group_store)
             .finish()
     }
@@ -77,22 +75,21 @@ where
     ) -> Self {
         let id_data_store = GroupStore::new(id_data);
         Self {
-            stream: stream.fuse(),
+            stream: PeekableFused::new(stream.fuse()),
             in_progress_queue: PeekableFused::new(FuturesUnordered::new()),
-            max_global_weight,
-            current_global_weight: 0,
+            global_weight: GlobalWeight::new(max_global_weight),
             group_store: id_data_store,
         }
     }
 
     /// Returns the maximum weight of futures allowed to be run by this adaptor.
     pub fn max_global_weight(&self) -> usize {
-        self.max_global_weight
+        self.global_weight.max()
     }
 
     /// Returns the current global weight of futures.
     pub fn current_global_weight(&self) -> usize {
-        self.current_global_weight
+        self.global_weight.current()
     }
 
     /// Returns the maximum weight of futures allowed to be run within this group.
@@ -122,7 +119,7 @@ where
     /// Acquires a reference to the underlying sink or stream that this combinator is
     /// pulling from.
     pub fn get_ref(&self) -> &St {
-        self.stream.get_ref()
+        self.stream.get_ref().get_ref()
     }
 
     /// Acquires a mutable reference to the underlying sink or stream that this
@@ -131,7 +128,7 @@ where
     /// Note that care must be taken to avoid tampering with the state of the
     /// sink or stream which may otherwise confuse this combinator.
     pub fn get_mut(&mut self) -> &mut St {
-        self.stream.get_mut()
+        self.stream.get_mut().get_mut()
     }
 
     /// Acquires a pinned mutable reference to the underlying sink or stream that this
@@ -140,7 +137,7 @@ where
     /// Note that care must be taken to avoid tampering with the state of the
     /// sink or stream which may otherwise confuse this combinator.
     pub fn get_pin_mut(self: Pin<&mut Self>) -> core::pin::Pin<&mut St> {
-        self.project().stream.get_pin_mut()
+        self.project().stream.get_pin_mut().get_pin_mut()
     }
 
     /// Consumes this combinator, returning the underlying sink or stream.
@@ -148,7 +145,7 @@ where
     /// Note that this may discard intermediate state of this combinator, so
     /// care should be taken to avoid losing resources when this is called.
     pub fn into_inner(self) -> St {
-        self.stream.into_inner()
+        self.stream.into_inner().into_inner()
     }
 
     // ---
@@ -168,16 +165,7 @@ where
 
         match ready!(this.in_progress_queue.poll_next_unpin(cx)) {
             Some((weight, id, output)) => {
-                *this.current_global_weight = this
-                    .current_global_weight
-                    .checked_sub(weight)
-                    .unwrap_or_else(|| {
-                        panic!(
-                        "future_queue_grouped: subtracted weight {} from current {}, overflowed",
-                        weight,
-                        this.current_global_weight,
-                    )
-                    });
+                this.global_weight.sub_weight(weight);
 
                 let mut any_queued = false;
 
@@ -186,29 +174,23 @@ where
                     data.sub_weight(&id, weight);
 
                     // Can we queue up additional futures from the queued ones for this ID?
-                    while data.current_weight < data.max_weight
-                        && this.current_global_weight < this.max_global_weight
-                    {
-                        let (weight, id, future) = match data.queued.pop_front() {
-                            Some(x) => x,
-                            None => break,
-                        };
-                        data.add_weight(&id, weight);
-                        *this.current_global_weight = this
-                            .current_global_weight
-                            .checked_add(weight)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                "future_queue_grouped: added weight {} to current {}, overflowed",
-                                weight,
-                                this.current_global_weight,
-                            )
-                            });
-                        this.in_progress_queue
-                            .as_mut()
-                            .get_pin_mut()
-                            .push(FutureWithGW::new(weight, Some(id), future));
-                        any_queued = true;
+                    while let Some(&(weight, _, _)) = data.queued.front() {
+                        if this.global_weight.has_space_for(weight) && data.has_space_for(weight) {
+                            // The future can be queued up.
+                            let (weight, id, future) = data.queued.pop_front().unwrap();
+                            this.global_weight.add_weight(weight);
+                            data.add_weight(&id, weight);
+                            this.in_progress_queue
+                                .as_mut()
+                                .get_pin_mut()
+                                .push(FutureWithGW::new(weight, Some(id), future));
+                            any_queued = true;
+                        } else {
+                            // Further futures cannot be queued up since doing so would cause one or
+                            // both of the overall weights to be exceeded -- leave them alone and
+                            // exit the loop.
+                            break;
+                        }
                     }
                 }
 
@@ -237,53 +219,44 @@ where
         // Next, let's try to spawn off as many futures as possible by filling up our queue of
         // futures.
 
-        while *this.current_global_weight < *this.max_global_weight {
-            match this.stream.as_mut().poll_next(cx) {
-                Poll::Ready(Some(weighted_future)) => {
-                    let (weight, id, future) = weighted_future.into_components();
+        while let Poll::Ready(Some(weighted_future)) = this.stream.as_mut().poll_peek(cx) {
+            let weight = weighted_future.weight();
+            if !this.global_weight.has_space_for(weight) {
+                // Global limits would be exceeded, break out of the loop. Consider this
+                // item next time.
+                break;
+            }
+            // We *do not* care about the group limit before pulling this item out. That's because
+            // if the group is full, it will be queued up in the group queue.
 
-                    if let Some(id) = id {
-                        // Is this group full?
-                        let data = this.group_store.get_id_mut_or_unwrap(&id);
-                        // Just like for the global weight, we want to allow exceeding the weight
-                        // but stop running subsequent futures after that. This prevents issues
-                        // where a particular future requires more than the maximum weight available
-                        // for that ID.
-                        if data.current_weight < data.max_weight {
-                            data.add_weight(&id, weight);
-                            *this.current_global_weight = this.current_global_weight.checked_add(weight).unwrap_or_else(|| {
-                                panic!(
-                                    "future_queue_grouped: added weight {} to current {}, overflowed",
-                                    weight,
-                                    this.current_global_weight,
-                                )
-                            });
-                            this.in_progress_queue
-                                .as_mut()
-                                .get_pin_mut()
-                                .push(FutureWithGW::new(weight, Some(id), future));
-                            any_queued = true;
-                        } else {
-                            data.queued.push_back((weight, id, future));
-                        }
-                    } else {
-                        // No ID associated with this future.
-                        *this.current_global_weight =
-                            this.current_global_weight.checked_add(weight).unwrap_or_else(|| {
-                                panic!(
-                                    "future_queue_grouped: added weight {} to current {}, overflowed",
-                                    weight,
-                                    this.current_global_weight,
-                                )
-                            });
-                        this.in_progress_queue
-                            .as_mut()
-                            .get_pin_mut()
-                            .push(FutureWithGW::new(weight, None, future));
-                        any_queued = true;
-                    }
+            // Grab the next element from the queue.
+            let (weight, id, future) = match this.stream.as_mut().poll_next(cx) {
+                Poll::Ready(Some(weighted_future)) => weighted_future.into_components(),
+                _ => unreachable!("we just peeked at this item"),
+            };
+
+            if let Some(id) = id {
+                // Is this group full?
+                let data = this.group_store.get_id_mut_or_unwrap(&id);
+                if data.has_space_for(weight) {
+                    this.global_weight.add_weight(weight);
+                    data.add_weight(&id, weight);
+                    this.in_progress_queue
+                        .as_mut()
+                        .get_pin_mut()
+                        .push(FutureWithGW::new(weight, Some(id), future));
+                    any_queued = true;
+                } else {
+                    data.queued.push_back((weight, id, future));
                 }
-                Poll::Ready(None) | Poll::Pending => break,
+            } else {
+                // No ID associated with this future.
+                this.global_weight.add_weight(weight);
+                this.in_progress_queue
+                    .as_mut()
+                    .get_pin_mut()
+                    .push(FutureWithGW::new(weight, None, future));
+                any_queued = true;
             }
         }
 
@@ -375,7 +348,7 @@ where
     }
 
     fn get_id_mut_or_unwrap(&mut self, id: &Q) -> &mut GroupData<Q, Fut> {
-        if self.group_data.get(id).is_some() {
+        if self.group_data.contains_key(id) {
             // Can't just use get_mut above because we're going to run into
             // https://doc.rust-lang.org/nomicon/lifetime-mismatch.html#improperly-reduced-borrows
             // with the else branch.
@@ -402,8 +375,14 @@ struct GroupData<Q, Fut> {
 }
 
 impl<Q: fmt::Debug, Fut> GroupData<Q, Fut> {
+    fn has_space_for(&self, weight: usize) -> bool {
+        let weight = weight.min(self.max_weight);
+        self.current_weight <= self.max_weight - weight
+    }
+
     // The ID is passed in only for its Debug impl.
     fn add_weight(&mut self, id: &Q, weight: usize) {
+        let weight = weight.min(self.max_weight);
         self.current_weight = self.current_weight.checked_add(weight).unwrap_or_else(|| {
             panic!(
                 "future_queue_grouped: for id `{:?}`, added weight {} to current {}, overflowed",
@@ -413,6 +392,7 @@ impl<Q: fmt::Debug, Fut> GroupData<Q, Fut> {
     }
 
     fn sub_weight(&mut self, id: &Q, weight: usize) {
+        let weight = weight.min(self.max_weight);
         self.current_weight = self.current_weight.checked_sub(weight).unwrap_or_else(|| {
             panic!(
                 "future_queue_grouped: for id `{:?}`, sub weight {} from current {}, underflowed",
@@ -463,6 +443,9 @@ pub trait GroupedWeightedFuture: private::Sealed {
     /// The associated key lookup type.
     type Q;
 
+    /// Returns the weight.
+    fn weight(&self) -> usize;
+
     /// Turns self into its components.
     fn into_components(self) -> (usize, Option<Self::Q>, Self::Future);
 }
@@ -475,6 +458,11 @@ where
 {
     type Future = Fut;
     type Q = Q;
+
+    #[inline]
+    fn weight(&self) -> usize {
+        self.0
+    }
 
     #[inline]
     fn into_components(self) -> (usize, Option<Self::Q>, Self::Future) {

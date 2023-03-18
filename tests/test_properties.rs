@@ -127,21 +127,21 @@ impl GroupSpec for () {
         check_state.last_started_id = Some(id);
 
         // Check that current_weight doesn't go over the limit.
+        check_state.current_weight += desc.weight.min(state.max_weight);
         assert!(
-            check_state.current_weight < state.max_weight,
-            "current weight {} exceeds max weight {}",
+            check_state.current_weight <= state.max_weight,
+            "current weight {} <= max weight {}",
             check_state.current_weight,
             state.max_weight,
         );
-        check_state.current_weight += desc.weight;
     }
 
     fn check_finished(
         check_state: &mut Self::CheckState,
         desc: &TestFutureDesc<Self>,
-        _state: &TestState<Self>,
+        state: &TestState<Self>,
     ) {
-        check_state.current_weight -= desc.weight;
+        check_state.current_weight -= desc.weight.min(state.max_weight);
     }
 }
 
@@ -214,36 +214,37 @@ impl GroupSpec for Option<TestGroup> {
         state: &TestState<Self>,
     ) {
         // Check that current_weight doesn't go over the limit.
+        check_state.current_weight += desc.weight.min(state.max_weight);
         assert!(
-            check_state.current_weight < state.max_weight,
-            "current weight {} exceeds max weight {}",
+            check_state.current_weight <= state.max_weight,
+            "current weight {} <= max weight {}",
             check_state.current_weight,
             state.max_weight,
         );
-        check_state.current_weight += desc.weight;
         if let Some(group) = desc.group {
             let max_group_weight = state.group_desc.map[&group];
             let current_group_weight = check_state.group_weights.get_mut(&group).unwrap();
+            *current_group_weight += desc.weight.min(max_group_weight);
             assert!(
-                *current_group_weight < max_group_weight,
-                "current weight {} exceeds max weight {} for group {:?}",
+                *current_group_weight <= max_group_weight,
+                "current weight {} <= max weight {} for group {:?}",
                 *current_group_weight,
                 max_group_weight,
                 group,
             );
-            *current_group_weight += desc.weight;
         }
     }
 
     fn check_finished(
         check_state: &mut Self::CheckState,
         desc: &TestFutureDesc<Self>,
-        _state: &TestState<Self>,
+        state: &TestState<Self>,
     ) {
-        check_state.current_weight -= desc.weight;
+        check_state.current_weight -= desc.weight.min(state.max_weight);
         if let Some(group) = desc.group {
             let current_group_weight = check_state.group_weights.get_mut(&group).unwrap();
-            *current_group_weight -= desc.weight;
+            let max_group_weight = state.group_desc.map[&group];
+            *current_group_weight -= desc.weight.min(max_group_weight);
         }
         // Note that this code doesn't currently check that futures from this group are
         // preferentially queued up first. That is a surprisingly hard problem that is somewhat
