@@ -1,11 +1,11 @@
 # Changelog
 
-## Unreleased
+## [0.3.0] - 2023-03-18
 
 ### Changed
 
 - Changed definitions of `future_queue` and `future_queue_grouped` such that weights can no longer be
-  exceeded. This enables certain additional use cases.
+  exceeded. This is easier to explain and enables certain additional use cases in nextest.
 
 ## [0.2.2] - 2022-12-27
 
@@ -42,6 +42,7 @@
 
 - Initial release.
 
+[0.3.0]: https://github.com/nextest-rs/future-queue/releases/tag/0.3.0
 [0.2.2]: https://github.com/nextest-rs/future-queue/releases/tag/0.2.2
 [0.2.1]: https://github.com/nextest-rs/future-queue/releases/tag/0.2.1
 [0.2.0]: https://github.com/nextest-rs/future-queue/releases/tag/0.2.0
