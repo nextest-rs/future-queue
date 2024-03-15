@@ -9,7 +9,7 @@ on:
 jobs:
   create-release:
     if: github.repository_owner == 'nextest-rs'
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3
         with:
