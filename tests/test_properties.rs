@@ -412,7 +412,7 @@ fn test_future_queue_impl<G: GroupSpec>(state: TestState<G>) {
         let not_completed: Vec<_> = completed_map
             .iter()
             .enumerate()
-            .filter_map(|(n, &v)| (!v).then(|| n.to_string()))
+            .filter(|(_, v)| !*v).map(|(n, _)| n.to_string())
             .collect();
         if !not_completed.is_empty() {
             let not_completed_ids = not_completed.join(", ");
