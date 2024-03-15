@@ -8,7 +8,7 @@ readme = "README.md"
 repository = "https://github.com/nextest-rs/future-queue"
 documentation = "https://docs.rs/future-queue"
 resolver = "2"
-rust-version = "1.56"
+rust-version = "1.70"
 categories = ["asynchronous"]
 keywords = ["stream", "futures", "async", "buffer_unordered"]
 

@@ -14,8 +14,8 @@
 * with global limits
 * and with an optional group specified for each future, with its own limits.
 
-This crate is part of the [nextest organization](https://github.com/nextest-rs) on GitHub, and is
-designed to serve the needs of [cargo-nextest](https://nexte.st).
+This crate is part of the [nextest organization](https://github.com/nextest-rs) on GitHub, and
+is designed to serve the needs of [cargo-nextest](https://nexte.st).
 
 ## Motivation
 
@@ -25,8 +25,8 @@ this adaptor takes a stream of futures[^1], and executes all the futures limited
 amount of concurrency.
 
 * Futures are started in the order the stream returns them in.
-* Once started, futures are polled simultaneously, and completed future outputs are returned
-  in arbitrary order (hence the `unordered`).
+* Once started, futures are polled simultaneously, and completed future outputs are returned in
+  arbitrary order (hence the `unordered`).
 
 Common use cases for `buffer_unordered` include:
 
@@ -99,10 +99,10 @@ except it is possible to specify an optional *group* for each future. Each group
 weight, and a future will only be scheduled if both the maximum weight and the group weight
 aren't exceeded.
 
-The adaptor is as fair as possible under the given constraints: it will schedule futures in
-the order they're returned by the stream, without doing any reordering based on weight. When
-a future from a group completes, queued up futures in this group will be preferentially
-scheduled before any other futures from the provided stream.
+The adaptor is as fair as possible under the given constraints: it will schedule futures in the
+order they're returned by the stream, without doing any reordering based on weight. When a
+future from a group completes, queued up futures in this group will be preferentially scheduled
+before any other futures from the provided stream.
 
 Like with [`future_queue`](StreamExt::future_queue):
 
@@ -140,11 +140,11 @@ assert_eq!(queue.next().await, None);
 
 ## Minimum supported Rust version (MSRV)
 
-The minimum supported Rust version is **Rust 1.56.**
+The minimum supported Rust version is **Rust 1.70.** At any time, at least the last six months
+of Rust stable releases are supported.
 
-The MSRV will likely not change in the medium term, but while this crate is a pre-release
-(0.x.x) it may have its MSRV bumped in a patch release. Once this crate has reached 1.x, any
-MSRV bump will be accompanied with a new minor version.
+While this crate is a pre-release (0.x.x) it may have its MSRV bumped in a patch release. Once
+this crate has reached 1.x, any MSRV bump will be accompanied with a new minor version.
 
 ## Notes
 
