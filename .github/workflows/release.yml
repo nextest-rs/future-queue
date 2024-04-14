@@ -19,7 +19,7 @@ jobs:
       - run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - uses: taiki-e/create-gh-release-action@8df4de6534ceacdaed10a08f73418ca751f31793 # v1
+      - uses: taiki-e/create-gh-release-action@c88e967dc754f9d45751df0de0a9e636115f121d # v1
         with:
           changelog: CHANGELOG.md
           title: future-queue $version
