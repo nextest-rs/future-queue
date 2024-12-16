@@ -21,6 +21,6 @@ pin-project-lite = "0.2.15"
 futures = "0.3.31"
 maplit = "1.0.2"
 proptest = { version = "1.0.0", features = ["timeout"] }
-proptest-derive = "0.4.0"
+proptest-derive = "0.5.1"
 tokio = { version = "1.21.2", features = ["macros", "sync", "test-util", "time"] }
 tokio-stream = { version = "0.1.16" }
