@@ -1,7 +1,11 @@
 // Copyright (c) The buffer-unordered-weighted Contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use crate::{global_weight::GlobalWeight, peekable_fused::PeekableFused};
+use crate::{
+    global_weight::GlobalWeight, peekable_fused::PeekableFused, slots::SlotReservations,
+    FutureQueueContext,
+};
+use debug_ignore::DebugIgnore;
 use fnv::FnvHashMap;
 use futures_util::{
     ready,
@@ -31,7 +35,8 @@ pin_project! {
         #[pin]
         in_progress_queue: PeekableFused<InProgressQueue<St>>,
         global_weight: GlobalWeight,
-        group_store: GroupStore<<St::Item as GroupedWeightedFuture>::Q, K, <St::Item as GroupedWeightedFuture>::Future>,
+        slots: SlotReservations,
+        group_store: GroupStore<<St::Item as GroupedWeightedFuture>::Q, K, <St::Item as GroupedWeightedFuture>::F>,
     }
 }
 
@@ -56,6 +61,7 @@ where
             .field("stream", &self.stream)
             .field("in_progress_queue", &self.in_progress_queue)
             .field("global_weight", &self.global_weight)
+            .field("slots", &self.slots)
             .field("group_store", &self.group_store)
             .finish()
     }
@@ -78,7 +84,17 @@ where
             stream: PeekableFused::new(stream.fuse()),
             in_progress_queue: PeekableFused::new(FuturesUnordered::new()),
             global_weight: GlobalWeight::new(max_global_weight),
+            slots: SlotReservations::with_capacity(max_global_weight),
             group_store: id_data_store,
+        }
+    }
+
+    /// Sets a mode where extra internal verifications are performed.
+    #[doc(hidden)]
+    pub fn set_extra_verify(&mut self, verify: bool) {
+        self.slots.set_check_reserved(verify);
+        for data in self.group_store.group_data.values_mut() {
+            data.slots.set_check_reserved(verify);
         }
     }
 
@@ -164,26 +180,40 @@ where
         let mut this = self.project();
 
         match ready!(this.in_progress_queue.poll_next_unpin(cx)) {
-            Some((weight, id, output)) => {
+            Some((weight, global_slot, id_and_group_slot, output)) => {
                 this.global_weight.sub_weight(weight);
+                this.slots.release(global_slot);
 
                 let mut any_queued = false;
 
-                if let Some(id) = id {
+                if let Some((id, group_slot)) = id_and_group_slot {
                     let data = this.group_store.get_id_mut_or_unwrap(&id);
                     data.sub_weight(&id, weight);
+                    data.slots.release(group_slot);
 
                     // Can we queue up additional futures from the queued ones for this ID?
                     while let Some(&(weight, _, _)) = data.queued.front() {
                         if this.global_weight.has_space_for(weight) && data.has_space_for(weight) {
                             // The future can be queued up.
-                            let (weight, id, future) = data.queued.pop_front().unwrap();
+                            let (weight, id, future_fn) = data.queued.pop_front().unwrap();
                             this.global_weight.add_weight(weight);
                             data.add_weight(&id, weight);
-                            this.in_progress_queue
-                                .as_mut()
-                                .get_pin_mut()
-                                .push(FutureWithGW::new(weight, Some(id), future));
+
+                            let global_slot = this.slots.reserve();
+                            let group_slot = data.slots.reserve();
+
+                            let cx = FutureQueueContext {
+                                global_slot,
+                                group_slot: Some(group_slot),
+                            };
+                            let future = future_fn.0(cx);
+
+                            this.in_progress_queue.get_ref().push(FutureWithGW::new(
+                                weight,
+                                global_slot,
+                                Some((id, group_slot)),
+                                future,
+                            ));
                             any_queued = true;
                         } else {
                             // Further futures cannot be queued up since doing so would cause one or
@@ -230,7 +260,7 @@ where
             // if the group is full, it will be queued up in the group queue.
 
             // Grab the next element from the queue.
-            let (weight, id, future) = match this.stream.as_mut().poll_next(cx) {
+            let (weight, id, future_fn) = match this.stream.as_mut().poll_next(cx) {
                 Poll::Ready(Some(weighted_future)) => weighted_future.into_components(),
                 _ => unreachable!("we just peeked at this item"),
             };
@@ -241,21 +271,42 @@ where
                 if data.has_space_for(weight) {
                     this.global_weight.add_weight(weight);
                     data.add_weight(&id, weight);
-                    this.in_progress_queue
-                        .as_mut()
-                        .get_pin_mut()
-                        .push(FutureWithGW::new(weight, Some(id), future));
+
+                    let global_slot = this.slots.reserve();
+                    let group_slot = data.slots.reserve();
+
+                    let cx = FutureQueueContext {
+                        global_slot,
+                        group_slot: Some(group_slot),
+                    };
+                    let future = future_fn(cx);
+                    this.in_progress_queue.get_ref().push(FutureWithGW::new(
+                        weight,
+                        global_slot,
+                        Some((id, group_slot)),
+                        future,
+                    ));
                     any_queued = true;
                 } else {
-                    data.queued.push_back((weight, id, future));
+                    data.queued.push_back((weight, id, DebugIgnore(future_fn)));
                 }
             } else {
                 // No ID associated with this future.
                 this.global_weight.add_weight(weight);
-                this.in_progress_queue
-                    .as_mut()
-                    .get_pin_mut()
-                    .push(FutureWithGW::new(weight, None, future));
+
+                let global_slot = this.slots.reserve();
+                let cx = FutureQueueContext {
+                    global_slot,
+                    group_slot: None,
+                };
+                let future = future_fn(cx);
+
+                this.in_progress_queue.get_ref().push(FutureWithGW::new(
+                    weight,
+                    global_slot,
+                    None,
+                    future,
+                ));
                 any_queued = true;
             }
         }
@@ -319,12 +370,19 @@ where
     }
 }
 
-#[derive(Debug)]
-struct GroupStore<Q, K, Fut> {
-    group_data: FnvHashMap<K, GroupData<Q, Fut>>,
+struct GroupStore<Q, K, F> {
+    group_data: FnvHashMap<K, GroupData<Q, F>>,
 }
 
-impl<Q, K, Fut> GroupStore<Q, K, Fut>
+impl<Q: fmt::Debug, K: fmt::Debug, F> fmt::Debug for GroupStore<Q, K, F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GroupStore")
+            .field("group_data", &self.group_data)
+            .finish()
+    }
+}
+
+impl<Q, K, F> GroupStore<Q, K, F>
 where
     Q: Hash + Eq + fmt::Debug,
     K: Eq + Hash + fmt::Debug + Borrow<Q>,
@@ -336,6 +394,7 @@ where
                 let data = GroupData {
                     current_weight: 0,
                     max_weight: weight,
+                    slots: SlotReservations::with_capacity(weight),
                     queued: VecDeque::new(),
                 };
                 (id, data)
@@ -347,7 +406,7 @@ where
         }
     }
 
-    fn get_id_mut_or_unwrap(&mut self, id: &Q) -> &mut GroupData<Q, Fut> {
+    fn get_id_mut_or_unwrap(&mut self, id: &Q) -> &mut GroupData<Q, F> {
         if self.group_data.contains_key(id) {
             // Can't just use get_mut above because we're going to run into
             // https://doc.rust-lang.org/nomicon/lifetime-mismatch.html#improperly-reduced-borrows
@@ -367,11 +426,22 @@ where
     }
 }
 
-#[derive(Debug)]
-struct GroupData<Q, Fut> {
+struct GroupData<Q, F> {
     current_weight: usize,
     max_weight: usize,
-    queued: VecDeque<(usize, Q, Fut)>,
+    slots: SlotReservations,
+    queued: VecDeque<(usize, Q, DebugIgnore<F>)>,
+}
+
+impl<Q: fmt::Debug, F> fmt::Debug for GroupData<Q, F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GroupData")
+            .field("current_weight", &self.current_weight)
+            .field("max_weight", &self.max_weight)
+            .field("slots", &self.slots)
+            .field("queued", &self.queued)
+            .finish()
+    }
 }
 
 impl<Q: fmt::Debug, Fut> GroupData<Q, Fut> {
@@ -408,13 +478,25 @@ pin_project! {
         #[pin]
         future: Fut,
         weight: usize,
-        id: Option<Q>,
+        global_slot: u64,
+        // The second parameter is the group slot.
+        id_and_group_slot: Option<(Q, u64)>,
     }
 }
 
 impl<Fut, Q> FutureWithGW<Fut, Q> {
-    pub fn new(weight: usize, id: Option<Q>, future: Fut) -> Self {
-        Self { future, weight, id }
+    pub fn new(
+        weight: usize,
+        global_slot: u64,
+        id_and_group_slot: Option<(Q, u64)>,
+        future: Fut,
+    ) -> Self {
+        Self {
+            future,
+            weight,
+            global_slot,
+            id_and_group_slot,
+        }
     }
 }
 
@@ -422,21 +504,30 @@ impl<Fut, Q> Future for FutureWithGW<Fut, Q>
 where
     Fut: Future,
 {
-    type Output = (usize, Option<Q>, Fut::Output);
+    type Output = (usize, u64, Option<(Q, u64)>, Fut::Output);
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
         match this.future.poll(cx) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(output) => Poll::Ready((*this.weight, this.id.take(), output)),
+            Poll::Ready(output) => Poll::Ready((
+                *this.weight,
+                *this.global_slot,
+                this.id_and_group_slot.take(),
+                output,
+            )),
         }
     }
 }
 
-/// A trait for types which can be converted into a `Future`, an optional group, and a weight.
+/// A trait for types which can be converted into functions that return a
+/// `Future`, an optional group, and a weight.
 ///
 /// Provided in case it's necessary. This trait is only implemented for `(usize, Option<Q>, impl Future)`.
 pub trait GroupedWeightedFuture: private::Sealed {
+    /// The function to obtain the future from.
+    type F: FnOnce(FutureQueueContext) -> Self::Future;
+
     /// The associated `Future` type.
     type Future: Future;
 
@@ -447,15 +538,22 @@ pub trait GroupedWeightedFuture: private::Sealed {
     fn weight(&self) -> usize;
 
     /// Turns self into its components.
-    fn into_components(self) -> (usize, Option<Self::Q>, Self::Future);
+    fn into_components(self) -> (usize, Option<Self::Q>, Self::F);
 }
 
-impl<Fut, Q> private::Sealed for (usize, Option<Q>, Fut) where Fut: Future {}
-
-impl<Fut, Q> GroupedWeightedFuture for (usize, Option<Q>, Fut)
+impl<F, Fut, Q> private::Sealed for (usize, Option<Q>, F)
 where
+    F: FnOnce(FutureQueueContext) -> Fut,
     Fut: Future,
 {
+}
+
+impl<F, Fut, Q> GroupedWeightedFuture for (usize, Option<Q>, F)
+where
+    F: FnOnce(FutureQueueContext) -> Fut,
+    Fut: Future,
+{
+    type F = F;
     type Future = Fut;
     type Q = Q;
 
@@ -465,7 +563,7 @@ where
     }
 
     #[inline]
-    fn into_components(self) -> (usize, Option<Self::Q>, Self::Future) {
+    fn into_components(self) -> (usize, Option<Self::Q>, Self::F) {
         self
     }
 }

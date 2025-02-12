@@ -55,9 +55,11 @@ This crate provides two adaptors on streams.
 The [`future_queue`](StreamExt::future_queue) adaptor can run several futures simultaneously,
 limiting the concurrency to a maximum *weight*.
 
-Rather than taking a stream of futures, this adaptor takes a stream of `(usize, future)` pairs,
-where the `usize` indicates the weight of each future. This adaptor will schedule and buffer
-futures to be run until queueing the next future will exceed the maximum weight.
+Rather than taking a stream of futures, this adaptor takes a stream of
+`(usize, F)` pairs, where the `usize` indicates the weight of each future,
+and `F` is `FnOnce(FutureQueueContext) -> impl Future`. This adaptor will
+schedule and buffer futures to be run until queueing the next future will
+exceed the maximum weight.
 
 * The maximum weight is never exceeded while futures are being run.
 * If the weight of an individual future is greater than the maximum weight, its weight will be
@@ -80,7 +82,11 @@ use future_queue::{StreamExt as _};
 let (send_one, recv_one) = oneshot::channel();
 let (send_two, recv_two) = oneshot::channel();
 
-let stream_of_futures = stream::iter(vec![(1, recv_one), (2, recv_two)]);
+let stream_of_futures = stream::iter(
+    vec![(1, recv_one), (2, recv_two)],
+).map(|(weight, future)| {
+    (weight, move |_cx| future)
+});
 let mut queue = stream_of_futures.future_queue(10);
 
 send_two.send("hello")?;
@@ -116,7 +122,7 @@ Like with [`future_queue`](StreamExt::future_queue):
 
 ```rust
 use futures::{channel::oneshot, stream, StreamExt as _};
-use future_queue::{StreamExt as _};
+use future_queue::{FutureQueueContext, StreamExt as _};
 
 let (send_one, recv_one) = oneshot::channel();
 let (send_two, recv_two) = oneshot::channel();
@@ -126,7 +132,9 @@ let stream_of_futures = stream::iter(
         (1, Some("group1"), recv_one),
         (2, None, recv_two),
     ],
-);
+).map(|(weight, group, future)| {
+    (weight, group, move |_cx| future)
+});
 let mut queue = stream_of_futures.future_queue_grouped(10, [("group1", 5)]);
 
 send_two.send("hello")?;
