@@ -51,9 +51,11 @@
 //! The [`future_queue`](StreamExt::future_queue) adaptor can run several futures simultaneously,
 //! limiting the concurrency to a maximum *weight*.
 //!
-//! Rather than taking a stream of futures, this adaptor takes a stream of `(usize, future)` pairs,
-//! where the `usize` indicates the weight of each future. This adaptor will schedule and buffer
-//! futures to be run until queueing the next future will exceed the maximum weight.
+//! Rather than taking a stream of futures, this adaptor takes a stream of
+//! `(usize, F)` pairs, where the `usize` indicates the weight of each future,
+//! and `F` is `FnOnce(FutureQueueContext) -> impl Future`. This adaptor will
+//! schedule and buffer futures to be run until queueing the next future will
+//! exceed the maximum weight.
 //!
 //! * The maximum weight is never exceeded while futures are being run.
 //! * If the weight of an individual future is greater than the maximum weight, its weight will be
@@ -77,7 +79,11 @@
 //! let (send_one, recv_one) = oneshot::channel();
 //! let (send_two, recv_two) = oneshot::channel();
 //!
-//! let stream_of_futures = stream::iter(vec![(1, recv_one), (2, recv_two)]);
+//! let stream_of_futures = stream::iter(
+//!     vec![(1, recv_one), (2, recv_two)],
+//! ).map(|(weight, future)| {
+//!     (weight, move |_cx| future)
+//! });
 //! let mut queue = stream_of_futures.future_queue(10);
 //!
 //! send_two.send("hello")?;
@@ -115,7 +121,7 @@
 //! ```rust
 //! # futures::executor::block_on(async {
 //! use futures::{channel::oneshot, stream, StreamExt as _};
-//! use future_queue::{StreamExt as _};
+//! use future_queue::{FutureQueueContext, StreamExt as _};
 //!
 //! let (send_one, recv_one) = oneshot::channel();
 //! let (send_two, recv_two) = oneshot::channel();
@@ -125,7 +131,9 @@
 //!         (1, Some("group1"), recv_one),
 //!         (2, None, recv_two),
 //!     ],
-//! );
+//! ).map(|(weight, group, future)| {
+//!     (weight, group, move |_cx| future)
+//! });
 //! let mut queue = stream_of_futures.future_queue_grouped(10, [("group1", 5)]);
 //!
 //! send_two.send("hello")?;
@@ -155,6 +163,7 @@ mod future_queue;
 mod future_queue_grouped;
 mod global_weight;
 mod peekable_fused;
+mod slots;
 
 pub use crate::future_queue::FutureQueue;
 pub use future_queue_grouped::FutureQueueGrouped;
@@ -196,9 +205,10 @@ pub trait StreamExt: Stream {
     /// # Examples
     ///
     /// See [the crate documentation](crate#examples) for an example.
-    fn future_queue<Fut>(self, max_weight: usize) -> FutureQueue<Self>
+    fn future_queue<F, Fut>(self, max_weight: usize) -> FutureQueue<Self>
     where
-        Self: Sized + Stream<Item = (usize, Fut)>,
+        Self: Sized + Stream<Item = (usize, F)>,
+        F: FnOnce(FutureQueueContext) -> Fut,
         Fut: Future,
     {
         assert_stream::<Fut::Output, _>(FutureQueue::new(self, max_weight))
@@ -209,7 +219,7 @@ pub trait StreamExt: Stream {
     ///
     /// This method accepts a maximum global weight, as well as a set of *groups* of type `K`. Each
     /// group has a defined maximum weight. This stream must return values of type `(usize,
-    /// Option<Q>, impl Future)`, where `K` is `Borrow<Q>`.
+    /// Option<Q>, F)`, where `K` is `Borrow<Q>`, and `F` is `FnOnce(FutureQueueContext) -> impl Future)`.
     ///
     /// This adapter will buffer futures up to weight `max_weight`. If the optional group is
     /// specified for a future, it will also check that the weight of futures in that group does not
@@ -238,7 +248,7 @@ pub trait StreamExt: Stream {
     ///
     /// The stream panics if the optional group provided by a stream element isn't in the set of
     /// known groups.
-    fn future_queue_grouped<Fut, I, K, Q>(
+    fn future_queue_grouped<F, Fut, I, K, Q>(
         self,
         max_global_weight: usize,
         groups: I,
@@ -247,10 +257,46 @@ pub trait StreamExt: Stream {
         I: IntoIterator<Item = (K, usize)>,
         K: Eq + Hash + Borrow<Q> + std::fmt::Debug,
         Q: Eq + Hash + std::fmt::Debug,
-        Self: Sized + Stream<Item = (usize, Option<Q>, Fut)>,
+        Self: Sized + Stream<Item = (usize, Option<Q>, F)>,
+        F: FnOnce(FutureQueueContext) -> Fut,
         Fut: Future,
     {
         assert_stream::<Fut::Output, _>(FutureQueueGrouped::new(self, max_global_weight, groups))
+    }
+}
+
+/// Context for a function in a [`FutureQueue`] or [`FutureQueueGrouped`].
+#[derive(Clone, Debug)]
+pub struct FutureQueueContext {
+    global_slot: u64,
+    group_slot: Option<u64>,
+}
+
+impl FutureQueueContext {
+    /// Returns a global slot number: an integer that is unique for the lifetime
+    /// of the future, within the context of the [`FutureQueue`] or
+    /// [`FutureQueueGrouped`] it is running in.
+    ///
+    /// The slot number is *compact*: it starts from 0, and is always the
+    /// smallest possible number that could be assigned to the future at the
+    /// moment the function is called.
+    #[inline]
+    pub fn global_slot(&self) -> u64 {
+        self.global_slot
+    }
+
+    /// Returns a group slot number: an integer that is unique for the lifetime
+    /// of the future within a group.
+    ///
+    /// The slot number is *compact*: it starts from 0, and is always the
+    /// smallest possible number that could be assigned to the future at the
+    /// moment the function is called.
+    ///
+    /// Only set in case [`FutureQueueGrouped`] is used, and the future is part
+    /// of a group.
+    #[inline]
+    pub fn group_slot(&self) -> Option<u64> {
+        self.group_slot
     }
 }
 

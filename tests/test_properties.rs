@@ -1,14 +1,16 @@
 // Copyright (c) The future-queue Contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+use fnv::FnvHashMap;
 use future_queue::{
     traits::{GroupedWeightedFuture, WeightedFuture},
-    FutureQueue, FutureQueueGrouped, StreamExt as _,
+    FutureQueue, FutureQueueContext, FutureQueueGrouped, StreamExt as _,
 };
 use futures::{future::BoxFuture, stream, Future, FutureExt, Stream, StreamExt as _};
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 use std::{borrow::Borrow, collections::HashMap, pin::Pin, sync::Arc, time::Duration};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 #[derive(Clone, Debug, Arbitrary)]
@@ -47,9 +49,18 @@ trait GroupSpec: Arbitrary + Send + Sync + Copy + 'static {
         St: Stream<Item = Self::Item> + Send + 'static;
 
     fn create_stream_item(
+        id: usize,
         desc: &TestFutureDesc<Self>,
         future: impl Future<Output = ()> + Send + 'static,
+        sender: UnboundedSender<FutureEvent<Self>>,
     ) -> Self::Item;
+
+    fn check_function_called(
+        check_state: &mut Self::CheckState,
+        id: usize,
+        desc: &TestFutureDesc<Self>,
+        cx: FutureQueueContext,
+    );
 
     fn check_started(
         check_state: &mut Self::CheckState,
@@ -60,6 +71,7 @@ trait GroupSpec: Arbitrary + Send + Sync + Copy + 'static {
 
     fn check_finished(
         check_state: &mut Self::CheckState,
+        id: usize,
         desc: &TestFutureDesc<Self>,
         state: &TestState<Self>,
     );
@@ -94,7 +106,10 @@ where
 type BoxedWeightedStream<'a, Item> = Pin<Box<dyn WeightedStream<Item = Item> + Send + 'a>>;
 
 impl GroupSpec for () {
-    type Item = (usize, BoxFuture<'static, ()>);
+    type Item = (
+        usize,
+        Box<dyn FnOnce(FutureQueueContext) -> BoxFuture<'static, ()> + Send + 'static>,
+    );
     type GroupDesc = ();
     type CheckState = NonGroupedCheckState;
 
@@ -106,10 +121,27 @@ impl GroupSpec for () {
     }
 
     fn create_stream_item(
+        id: usize,
         desc: &TestFutureDesc<Self>,
         future: impl Future<Output = ()> + Send + 'static,
+        sender: UnboundedSender<FutureEvent<Self>>,
     ) -> Self::Item {
-        (desc.weight, future.boxed())
+        (
+            desc.weight,
+            Box::new(move |cx| {
+                sender.send(FutureEvent::FunctionCalled(id, cx)).unwrap();
+                future.boxed()
+            }),
+        )
+    }
+
+    fn check_function_called(
+        check_state: &mut Self::CheckState,
+        id: usize,
+        _desc: &TestFutureDesc<Self>,
+        cx: FutureQueueContext,
+    ) {
+        check_state.slots.insert_lowest(cx.global_slot(), id);
     }
 
     fn check_started(
@@ -138,10 +170,12 @@ impl GroupSpec for () {
 
     fn check_finished(
         check_state: &mut Self::CheckState,
+        id: usize,
         desc: &TestFutureDesc<Self>,
         state: &TestState<Self>,
     ) {
         check_state.current_weight -= desc.weight.min(state.max_weight);
+        check_state.slots.remove_slot_for_id(id);
     }
 }
 
@@ -149,6 +183,7 @@ impl GroupSpec for () {
 struct NonGroupedCheckState {
     last_started_id: Option<usize>,
     current_weight: usize,
+    slots: SlotMap,
 }
 
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Debug, Arbitrary)]
@@ -183,7 +218,11 @@ impl Arbitrary for TestGroupState {
 }
 
 impl GroupSpec for Option<TestGroup> {
-    type Item = (usize, Option<TestGroup>, BoxFuture<'static, ()>);
+    type Item = (
+        usize,
+        Option<TestGroup>,
+        Box<dyn FnOnce(FutureQueueContext) -> BoxFuture<'static, ()> + Send + 'static>,
+    );
     type GroupDesc = TestGroupState;
     type CheckState = GroupedCheckState;
 
@@ -197,14 +236,44 @@ impl GroupSpec for Option<TestGroup> {
             .map
             .iter()
             .map(|(group, max_weight)| (Arc::new(*group), *max_weight));
-        Box::pin(stream.future_queue_grouped(state.max_weight, groups))
+        let mut stream = stream.future_queue_grouped(state.max_weight, groups);
+        stream.set_extra_verify(true);
+        Box::pin(stream)
     }
 
     fn create_stream_item(
+        id: usize,
         desc: &TestFutureDesc<Self>,
         future: impl Future<Output = ()> + Send + 'static,
+        sender: UnboundedSender<FutureEvent<Self>>,
     ) -> Self::Item {
-        (desc.weight, desc.group, future.boxed())
+        (
+            desc.weight,
+            desc.group,
+            Box::new(move |cx| {
+                sender.send(FutureEvent::FunctionCalled(id, cx)).unwrap();
+                future.boxed()
+            }),
+        )
+    }
+
+    fn check_function_called(
+        check_state: &mut Self::CheckState,
+        id: usize,
+        desc: &TestFutureDesc<Self>,
+        cx: FutureQueueContext,
+    ) {
+        check_state.global_slots.insert_lowest(cx.global_slot(), id);
+        if let Some(group) = desc.group {
+            let group_slots = check_state
+                .group_slots
+                .get_mut(&group)
+                .expect("group slot map exists");
+            let group_slot = cx
+                .group_slot()
+                .expect("desc.group is Some so a group slot should be assigned");
+            group_slots.insert_lowest(group_slot, id);
+        }
     }
 
     fn check_started(
@@ -237,15 +306,25 @@ impl GroupSpec for Option<TestGroup> {
 
     fn check_finished(
         check_state: &mut Self::CheckState,
+        id: usize,
         desc: &TestFutureDesc<Self>,
         state: &TestState<Self>,
     ) {
         check_state.current_weight -= desc.weight.min(state.max_weight);
+        check_state.global_slots.remove_slot_for_id(id);
+
         if let Some(group) = desc.group {
             let current_group_weight = check_state.group_weights.get_mut(&group).unwrap();
             let max_group_weight = state.group_desc.map[&group];
             *current_group_weight -= desc.weight.min(max_group_weight);
+
+            check_state
+                .group_slots
+                .get_mut(&group)
+                .expect("group slot map exists")
+                .remove_slot_for_id(id);
         }
+
         // Note that this code doesn't currently check that futures from this group are
         // preferentially queued up first. That is a surprisingly hard problem that is somewhat
         // low-impact to test (since it falls out of the basic correct implementation).
@@ -256,6 +335,11 @@ impl GroupSpec for Option<TestGroup> {
 struct GroupedCheckState {
     current_weight: usize,
     group_weights: HashMap<TestGroup, usize>,
+    // A map of currently-occupied slots, where values are the ID of the future
+    // that occupies the slot.
+    global_slots: SlotMap,
+    // A map of currently-occupied slots for each group.
+    group_slots: FnvHashMap<TestGroup, SlotMap>,
 }
 
 impl Default for GroupedCheckState {
@@ -265,10 +349,68 @@ impl Default for GroupedCheckState {
         group_weights.insert(TestGroup::B, 0);
         group_weights.insert(TestGroup::C, 0);
         group_weights.insert(TestGroup::D, 0);
+
+        let global_slots = SlotMap::default();
+        let mut group_slots = FnvHashMap::default();
+        group_slots.insert(TestGroup::A, SlotMap::default());
+        group_slots.insert(TestGroup::B, SlotMap::default());
+        group_slots.insert(TestGroup::C, SlotMap::default());
+        group_slots.insert(TestGroup::D, SlotMap::default());
+
         GroupedCheckState {
             current_weight: 0,
             group_weights,
+            global_slots,
+            group_slots,
         }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct SlotMap {
+    slots: FnvHashMap<u64, usize>,
+}
+
+impl SlotMap {
+    fn insert_lowest(&mut self, slot: u64, id: usize) {
+        // Check that the slot is currently unoccupied.
+        if let Some(existing_id) = self.slots.get(&slot) {
+            panic!(
+                "slot {} is occupied by future {} (slot map: {:?})",
+                slot, existing_id, self.slots
+            );
+        }
+
+        // Check that the slot is the lowest unoccupied slot.
+        for i in 0..slot {
+            if !self.slots.contains_key(&i) {
+                panic!(
+                    "slot {} is not the lowest unoccupied slot (slot map: {:?})",
+                    slot, self.slots
+                );
+            }
+        }
+
+        self.slots.insert(slot, id);
+    }
+
+    fn slot_for_id(&self, id: usize) -> Option<u64> {
+        self.slots.iter().find_map(
+            |(slot, slot_id)| {
+                if *slot_id == id {
+                    Some(*slot)
+                } else {
+                    None
+                }
+            },
+        )
+    }
+
+    fn remove_slot_for_id(&mut self, id: usize) {
+        let slot = self
+            .slot_for_id(id)
+            .unwrap_or_else(|| panic!("id {id} should have had a global slot assigned to it"));
+        self.slots.remove(&slot);
     }
 }
 
@@ -317,8 +459,9 @@ proptest! {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum FutureEvent<G: GroupSpec> {
+    FunctionCalled(usize, FutureQueueContext),
     Started(usize, TestFutureDesc<G>),
     Finished(usize, TestFutureDesc<G>),
 }
@@ -330,7 +473,7 @@ fn test_future_queue_impl<G: GroupSpec>(state: TestState<G>) {
         .build()
         .expect("tokio builder succeeded");
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-    let (future_sender, future_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (item_sender, item_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let futures = state
         .future_descriptions
@@ -339,23 +482,26 @@ fn test_future_queue_impl<G: GroupSpec>(state: TestState<G>) {
         .map(move |(id, desc)| {
             let desc = *desc;
             let sender = sender.clone();
-            let future_sender = future_sender.clone();
+            let item_sender = item_sender.clone();
             async move {
                 // First, sleep for this long.
                 tokio::time::sleep(desc.start_delay).await;
                 // For each description, create a future.
+                let sender2 = sender.clone();
                 let delay_fut = async move {
                     // Send the fact that this future started to the mpsc queue.
-                    sender
+                    sender2
                         .send(FutureEvent::Started(id, desc))
                         .expect("receiver held open by loop");
                     tokio::time::sleep(desc.delay).await;
-                    sender
+                    sender2
                         .send(FutureEvent::Finished(id, desc))
                         .expect("receiver held open by loop");
                 };
                 // Errors should never occur here.
-                if let Err(err) = future_sender.send(G::create_stream_item(&desc, delay_fut)) {
+                if let Err(err) =
+                    item_sender.send(G::create_stream_item(id, &desc, delay_fut, sender))
+                {
                     panic!("future_receiver held open by loop: {}", err);
                 }
             }
@@ -364,8 +510,8 @@ fn test_future_queue_impl<G: GroupSpec>(state: TestState<G>) {
     let combined_future = stream::iter(futures).buffer_unordered(1).collect::<()>();
     runtime.spawn(combined_future);
 
-    // We're going to use future_receiver as a stream.
-    let stream = UnboundedReceiverStream::new(future_receiver);
+    // We're going to use item_receiver as a stream.
+    let stream = UnboundedReceiverStream::new(item_receiver);
 
     let mut completed_map = vec![false; state.future_descriptions.len()];
     let mut check_state = G::CheckState::default();
@@ -382,13 +528,18 @@ fn test_future_queue_impl<G: GroupSpec>(state: TestState<G>) {
 
                 recv = receiver.recv(), if !receiver_done => {
                     match recv {
+                        Some(FutureEvent::FunctionCalled(id, cx)) => {
+                            // Ensure that the ID has not been seen before.
+                            assert!(!completed_map[id], "FunctionCalled for fresh future");
+                            G::check_function_called(&mut check_state, id, &state.future_descriptions[id], cx);
+                        }
                         Some(FutureEvent::Started(id, desc)) => {
                             G::check_started(&mut check_state, id, &desc, &state);
                         }
                         Some(FutureEvent::Finished(id, desc)) => {
                             // Record that this value was completed.
                             completed_map[id] = true;
-                            G::check_finished(&mut check_state, &desc, &state);
+                            G::check_finished(&mut check_state, id, &desc, &state);
                         }
                         None => {
                             // All futures finished -- going to check for completion in stream.next() below.

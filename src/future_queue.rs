@@ -1,7 +1,10 @@
 // Copyright (c) The future-queue Contributors
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-use crate::{global_weight::GlobalWeight, peekable_fused::PeekableFused};
+use crate::{
+    global_weight::GlobalWeight, peekable_fused::PeekableFused, slots::SlotReservations,
+    FutureQueueContext,
+};
 use futures_util::{
     stream::{Fuse, FuturesUnordered},
     Future, Stream, StreamExt as _,
@@ -24,6 +27,7 @@ pin_project! {
         #[pin]
         stream: PeekableFused<Fuse<St>>,
         in_progress_queue: FuturesUnordered<FutureWithWeight<<St::Item as WeightedFuture>::Future>>,
+        slots: SlotReservations,
         global_weight: GlobalWeight,
     }
 }
@@ -37,6 +41,7 @@ where
         f.debug_struct("FutureQueue")
             .field("stream", &self.stream)
             .field("in_progress_queue", &self.in_progress_queue)
+            .field("slots", &self.slots)
             .field("global_weight", &self.global_weight)
             .finish()
     }
@@ -51,8 +56,15 @@ where
         Self {
             stream: PeekableFused::new(stream.fuse()),
             in_progress_queue: FuturesUnordered::new(),
+            slots: SlotReservations::with_capacity(max_weight),
             global_weight: GlobalWeight::new(max_weight),
         }
+    }
+
+    /// Sets a mode where extra internal verifications are performed.
+    #[doc(hidden)]
+    pub fn set_extra_verify(&mut self, verify: bool) {
+        self.slots.set_check_reserved(verify);
     }
 
     /// Returns the maximum weight of futures allowed to be run by this adaptor.
@@ -117,20 +129,29 @@ where
                 break;
             }
 
-            let (weight, future) = match this.stream.as_mut().poll_next(cx) {
+            let (weight, future_fn) = match this.stream.as_mut().poll_next(cx) {
                 Poll::Ready(Some(weighted_future)) => weighted_future.into_components(),
                 _ => unreachable!("we just peeked at this item"),
             };
             this.global_weight.add_weight(weight);
+            let global_slot = this.slots.reserve();
+
+            let cx = FutureQueueContext {
+                global_slot,
+                group_slot: None,
+            };
+            let future = future_fn(cx);
+
             this.in_progress_queue
-                .push(FutureWithWeight::new(weight, future));
+                .push(FutureWithWeight::new(weight, global_slot, future));
         }
 
         // Attempt to pull the next value from the in_progress_queue.
         match this.in_progress_queue.poll_next_unpin(cx) {
             Poll::Pending => return Poll::Pending,
-            Poll::Ready(Some((weight, output))) => {
+            Poll::Ready(Some((weight, slot, output))) => {
                 this.global_weight.sub_weight(weight);
+                this.slots.release(slot);
                 return Poll::Ready(Some(output));
             }
             Poll::Ready(None) => {}
@@ -160,6 +181,9 @@ where
 ///
 /// Provided in case it's necessary. This trait is only implemented for `(usize, impl Future)`.
 pub trait WeightedFuture: private::Sealed {
+    /// The function to obtain the future from
+    type F: FnOnce(FutureQueueContext) -> Self::Future;
+
     /// The associated `Future` type.
     type Future: Future;
 
@@ -167,19 +191,26 @@ pub trait WeightedFuture: private::Sealed {
     fn weight(&self) -> usize;
 
     /// Turns self into its components.
-    fn into_components(self) -> (usize, Self::Future);
+    fn into_components(self) -> (usize, Self::F);
 }
 
 mod private {
     pub trait Sealed {}
 }
 
-impl<Fut> private::Sealed for (usize, Fut) where Fut: Future {}
-
-impl<Fut> WeightedFuture for (usize, Fut)
+impl<F, Fut> private::Sealed for (usize, F)
 where
+    F: FnOnce(FutureQueueContext) -> Fut,
     Fut: Future,
 {
+}
+
+impl<F, Fut> WeightedFuture for (usize, F)
+where
+    F: FnOnce(FutureQueueContext) -> Fut,
+    Fut: Future,
+{
+    type F = F;
     type Future = Fut;
 
     #[inline]
@@ -188,7 +219,7 @@ where
     }
 
     #[inline]
-    fn into_components(self) -> (usize, Self::Future) {
+    fn into_components(self) -> (usize, Self::F) {
         self
     }
 }
@@ -199,12 +230,17 @@ pin_project! {
         #[pin]
         future: Fut,
         weight: usize,
+        slot: u64,
     }
 }
 
 impl<Fut> FutureWithWeight<Fut> {
-    pub fn new(weight: usize, future: Fut) -> Self {
-        Self { future, weight }
+    pub fn new(weight: usize, slot: u64, future: Fut) -> Self {
+        Self {
+            future,
+            weight,
+            slot,
+        }
     }
 }
 
@@ -212,13 +248,13 @@ impl<Fut> Future for FutureWithWeight<Fut>
 where
     Fut: Future,
 {
-    type Output = (usize, Fut::Output);
+    type Output = (usize, u64, Fut::Output);
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
         match this.future.poll(cx) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(output) => Poll::Ready((*this.weight, output)),
+            Poll::Ready(output) => Poll::Ready((*this.weight, *this.slot, output)),
         }
     }
 }
