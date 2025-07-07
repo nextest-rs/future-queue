@@ -144,7 +144,7 @@ mod tests {
 
     fn assert_reserved(slots: &SlotReservations, expected: &[u64]) {
         for &slot in expected {
-            assert!(slots.check_reserved(slot), "slot {} is not reserved", slot);
+            assert!(slots.check_reserved(slot), "slot {slot} is not reserved");
         }
 
         // Also check slots from max to 64 or so to make sure they are not reserved.

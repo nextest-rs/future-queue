@@ -502,7 +502,7 @@ fn test_future_queue_impl<G: GroupSpec>(state: TestState<G>) {
                 if let Err(err) =
                     item_sender.send(G::create_stream_item(id, &desc, delay_fut, sender))
                 {
-                    panic!("future_receiver held open by loop: {}", err);
+                    panic!("future_receiver held open by loop: {err}");
                 }
             }
         })
@@ -567,7 +567,7 @@ fn test_future_queue_impl<G: GroupSpec>(state: TestState<G>) {
             .collect();
         if !not_completed.is_empty() {
             let not_completed_ids = not_completed.join(", ");
-            panic!("some futures did not complete: {}", not_completed_ids);
+            panic!("some futures did not complete: {not_completed_ids}");
         }
     })
 }
