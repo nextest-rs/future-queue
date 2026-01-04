@@ -25,3 +25,7 @@ proptest = { version = "1.6.0", features = ["timeout"] }
 proptest-derive = "0.5.1"
 tokio = { version = "1.38.2", features = ["macros", "sync", "test-util", "time"] }
 tokio-stream = { version = "0.1.17" }
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = ["cfg(kani)"]
