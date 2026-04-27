@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2
       - name: Build rustdoc
         run: cargo doc --all-features --workspace
@@ -22,7 +22,7 @@ jobs:
           mkdir target/gh-pages
           mv target/doc target/gh-pages/rustdoc
       - name: Deploy
-        uses: JamesIves/github-pages-deploy-action@releases/v4
+        uses: JamesIves/github-pages-deploy-action@800bbc83122db9d4c38fcd284782d5afe62e52df # releases/v4
         with:
           branch: gh-pages
           folder: target/gh-pages
