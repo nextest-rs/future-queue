@@ -15,11 +15,11 @@ keywords = ["stream", "futures", "async", "buffer_unordered"]
 [dependencies]
 debug-ignore = "1.0.5"
 fnv = "1.0.7"
-futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
+futures-util = { version = "0.3.32", default-features = false, features = ["std"] }
 pin-project-lite = "0.2.17"
 
 [dev-dependencies]
-futures = "0.3.31"
+futures = "0.3.32"
 maplit = "1.0.2"
 proptest = { version = "1.6.0", features = ["timeout"] }
 proptest-derive = "0.5.1"
