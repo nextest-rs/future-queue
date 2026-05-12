@@ -25,7 +25,7 @@ jobs:
       - name: Lint (rustfmt)
         run: cargo xfmt --check
       - name: Install cargo readme
-        uses: taiki-e/install-action@fa0dd4cd0a40696e6f9766370614a5ce482e6aa8 # v2
+        uses: taiki-e/install-action@c070f87102a1c75b3183910f391c1cb887fe13c8 # v2
         with:
           tool: cargo-readme
       - name: Run cargo readme
@@ -49,7 +49,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: ${{ matrix.rust-version }}
-      - uses: taiki-e/install-action@6fb7e047ecef54aa053294f996a8feb3a5769baf # nextest
+      - uses: taiki-e/install-action@da71d5095c1b175e60393b8d36727208ae905210 # nextest
       - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2
       - name: Build
         run: cargo build --all-features
