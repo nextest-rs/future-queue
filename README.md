@@ -146,6 +146,43 @@ assert_eq!(queue.next().await, Some(Ok("world")));
 assert_eq!(queue.next().await, None);
 ```
 
+### Concurrency and spawned tasks
+
+Both adaptors limit the weight of futures in the queue. Work started outside those futures
+can run independently of the limit. For example, `tokio::spawn` schedules a task immediately.
+Collecting its `JoinHandle`s before wrapping them in callbacks schedules every task before the
+queue is polled. Queueing those handles limits how many are awaited, but the tasks are already
+running.
+
+Spawn each task inside the callback or its returned async block, and await its handle before
+returning. The task then counts towards the queue's weight until completion.
+
+```rust
+use futures::{stream, StreamExt as _};
+use future_queue::StreamExt as _;
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<(), tokio::task::JoinError> {
+    let tasks = stream::iter(0..10).map(|value| {
+        (1, move |_cx| tokio::spawn(async move { value }))
+    });
+    let mut queue = tasks.future_queue(2);
+
+    while let Some(result) = queue.next().await {
+        result?;
+    }
+    Ok(())
+}
+```
+
+Here, at most two spawned tasks run at once. Dropping the queue drops their handles.
+Dropping a `JoinHandle` detaches its task. A detached task can continue running after the queue
+is dropped.
+
+The same task lifetime requirement applies to `buffer_unordered`. Return async blocks that
+spawn and await tasks when polled. Handles for tasks spawned earlier leave those tasks outside
+its concurrency limit.
+
 ## Minimum supported Rust version (MSRV)
 
 The minimum supported Rust version is **Rust 1.70.** At any time, at least the last six months
