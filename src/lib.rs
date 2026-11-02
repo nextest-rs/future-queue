@@ -104,9 +104,16 @@
 //! aren't exceeded.
 //!
 //! The adaptor is as fair as possible under the given constraints: it will schedule futures in the
-//! order they're returned by the stream, without doing any reordering based on weight. When a
-//! future from a group completes, queued up futures in this group will be preferentially scheduled
-//! before any other futures from the provided stream.
+//! order they're returned by the stream, without doing any reordering based on weight. When any
+//! future completes, futures are started in the following order of preference, as long as they
+//! fit within both the global weight and their group's weight:
+//!
+//! * Queued futures in the completed future's group, if it has one.
+//! * Queued futures in other groups, with groups visited in an unspecified order.
+//! * New futures from the stream, in the order the stream returns them.
+//!
+//! Within a group, queued futures start in the order the stream returned them, and scheduling
+//! stops at the first queued future that doesn't fit, even if a later one would fit.
 //!
 //! Like with [`future_queue`](StreamExt::future_queue):
 //!
@@ -223,8 +230,8 @@ pub trait StreamExt: Stream {
     ///
     /// This adapter will buffer futures up to weight `max_weight`. If the optional group is
     /// specified for a future, it will also check that the weight of futures in that group does not
-    /// exceed the specified limit. Any futures that exceed the group's weight limit will be queued
-    /// up, but not scheduled until the weight of futures in that group falls below the limit.
+    /// exceed the specified limit. Any future that exceeds the group's weight limit will be queued
+    /// up, but not scheduled until both the group weight and the global weight have room for it.
     ///
     /// Like with [`future_queue`](Self::future_queue):
     ///
@@ -237,8 +244,15 @@ pub trait StreamExt: Stream {
     ///
     /// The adaptor is as fair as possible under the given constraints: it will schedule futures in
     /// the order they're returned by the stream, without doing any reordering based on weight. When
-    /// a future from a group completes, queued up futures in this group will be preferentially
-    /// scheduled before any other futures from the provided stream.
+    /// any future completes, futures are started in the following order of preference, as long as
+    /// they fit within both the global weight and their group's weight:
+    ///
+    /// * Queued futures in the completed future's group, if it has one.
+    /// * Queued futures in other groups, with groups visited in an unspecified order.
+    /// * New futures from the stream, in the order the stream returns them.
+    ///
+    /// Within a group, queued futures start in the order the stream returned them, and scheduling
+    /// stops at the first queued future that doesn't fit, even if a later one would fit.
     ///
     /// The weight of a future can be zero, in which case it will not count towards the total weight.
     ///
