@@ -109,9 +109,16 @@ weight, and a future will only be scheduled if both the maximum weight and the g
 aren’t exceeded.
 
 The adaptor is as fair as possible under the given constraints: it will schedule futures in the
-order they’re returned by the stream, without doing any reordering based on weight. When a
-future from a group completes, queued up futures in this group will be preferentially scheduled
-before any other futures from the provided stream.
+order they’re returned by the stream, without doing any reordering based on weight. When any
+future completes, futures are started in the following order of preference, as long as they
+fit within both the global weight and their group’s weight:
+
+* Queued futures in the completed future’s group, if it has one.
+* Queued futures in other groups, with groups visited in an unspecified order.
+* New futures from the stream, in the order the stream returns them.
+
+Within a group, queued futures start in the order the stream returned them, and scheduling
+stops at the first queued future that doesn’t fit, even if a later one would fit.
 
 Like with [`future_queue`][StreamExt::future_queue]:
 
