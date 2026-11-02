@@ -37,6 +37,7 @@ pin_project! {
         global_weight: GlobalWeight,
         slots: SlotReservations,
         group_store: GroupStore<<St::Item as GroupedWeightedFuture>::Q, K, <St::Item as GroupedWeightedFuture>::F>,
+        extra_verify: bool,
     }
 }
 
@@ -63,6 +64,7 @@ where
             .field("global_weight", &self.global_weight)
             .field("slots", &self.slots)
             .field("group_store", &self.group_store)
+            .field("extra_verify", &self.extra_verify)
             .finish()
     }
 }
@@ -86,12 +88,14 @@ where
             global_weight: GlobalWeight::new(max_global_weight),
             slots: SlotReservations::with_capacity(max_global_weight),
             group_store: id_data_store,
+            extra_verify: false,
         }
     }
 
     /// Sets a mode where extra internal verifications are performed.
     #[doc(hidden)]
     pub fn set_extra_verify(&mut self, verify: bool) {
+        self.extra_verify = verify;
         self.slots.set_check_reserved(verify);
         for data in self.group_store.group_data.values_mut() {
             data.slots.set_check_reserved(verify);
@@ -168,6 +172,24 @@ where
     // Helper methods
     // ---
 
+    /// Verifies that there are no queue heads that can be started.
+    fn verify_no_startable_queue_heads(&self) {
+        for (id, data) in &self.group_store.group_data {
+            if let Some(&(weight, _, _)) = data.queued.front() {
+                assert!(
+                    !data.can_start(weight, &self.global_weight),
+                    "for group {id:?}, the queued future at the head (weight {weight}) fits \
+                     within both the global weight ({}/{}) and the group weight ({}/{}), \
+                     but was not started",
+                    self.global_weight.current(),
+                    self.global_weight.max(),
+                    data.current_weight,
+                    data.max_weight,
+                );
+            }
+        }
+    }
+
     // This returns true if any new futures were added to the in_progress_queue.
     #[allow(clippy::type_complexity)]
     fn poll_pop_in_progress(
@@ -185,18 +207,29 @@ where
                 this.slots.release(global_slot);
 
                 let mut any_queued = false;
+                let in_progress_queue = this.in_progress_queue.get_ref();
+                let mut start_queued = |data: &mut GroupData<_, _>| {
+                    start_queued_futures(data, this.global_weight, this.slots, in_progress_queue)
+                };
 
                 if let Some((id, group_slot)) = id_and_group_slot {
                     let data = this.group_store.get_id_mut_or_unwrap(&id);
                     data.sub_weight(&id, weight);
                     data.slots.release(group_slot);
 
-                    any_queued |= start_queued_futures(
-                        data,
-                        this.global_weight,
-                        this.slots,
-                        this.in_progress_queue.get_ref(),
-                    );
+                    // Try starting a future from this group first, prioritizing
+                    // the group.
+                    //
+                    // XXX: This behavior is left over from before the fix for
+                    // #603. Maybe we don't necessarily want to prioritize this
+                    // group and be globally FIFO instead? Worth thinking
+                    // carefully about this in the future.
+                    any_queued |= start_queued(data);
+                }
+
+                // This can unblock any group's queue head (#603).
+                for data in this.group_store.group_data.values_mut() {
+                    any_queued |= start_queued(data);
                 }
 
                 Poll::Ready((Some(output), any_queued))
@@ -206,16 +239,17 @@ where
     }
 }
 
-impl<St, K> Stream for FutureQueueGrouped<St, K>
+impl<St, K> FutureQueueGrouped<St, K>
 where
     St: Stream,
     St::Item: GroupedWeightedFuture,
     <St::Item as GroupedWeightedFuture>::Q: Eq + Hash + fmt::Debug,
     K: Eq + Hash + fmt::Debug + Borrow<<St::Item as GroupedWeightedFuture>::Q>,
 {
-    type Item = <<St::Item as GroupedWeightedFuture>::Future as Future>::Output;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next_impl(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<<<St::Item as GroupedWeightedFuture>::Future as Future>::Output>> {
         // First, attempt to pull the next value from the in progress queue.
         let (return_output, mut any_queued) = ready!(self.as_mut().poll_pop_in_progress(cx));
 
@@ -298,7 +332,7 @@ where
                     debug_assert_eq!(
                         self.group_store.num_queued_futures(),
                         0,
-                        "no futures should be left in the queue"
+                        "no futures should be left in any group queue"
                     );
                     Poll::Ready(None)
                 }
@@ -321,6 +355,24 @@ where
                 }
             }
         }
+    }
+}
+
+impl<St, K> Stream for FutureQueueGrouped<St, K>
+where
+    St: Stream,
+    St::Item: GroupedWeightedFuture,
+    <St::Item as GroupedWeightedFuture>::Q: Eq + Hash + fmt::Debug,
+    K: Eq + Hash + fmt::Debug + Borrow<<St::Item as GroupedWeightedFuture>::Q>,
+{
+    type Item = <<St::Item as GroupedWeightedFuture>::Future as Future>::Output;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let ret = self.as_mut().poll_next_impl(cx);
+        if self.extra_verify {
+            self.verify_no_startable_queue_heads();
+        }
+        ret
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
