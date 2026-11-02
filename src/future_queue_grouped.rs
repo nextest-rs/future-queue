@@ -129,7 +129,7 @@ where
         self.group_store
             .group_data
             .get(id)
-            .map(|id_data| id_data.max_weight)
+            .map(|id_data| id_data.current_weight)
     }
 
     /// Acquires a reference to the underlying sink or stream that this combinator is

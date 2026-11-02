@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `FutureQueueGrouped::current_group_weight` now returns the weight of futures currently running in the group. Previously, it returned the group's maximum weight.
+
 ## [0.4.0] - 2025-02-12
 
 ### Added
