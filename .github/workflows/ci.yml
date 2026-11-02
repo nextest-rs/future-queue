@@ -24,12 +24,17 @@ jobs:
         run: cargo clippy --all-features --all-targets
       - name: Lint (rustfmt)
         run: cargo xfmt --check
-      - name: Install cargo readme
+      - name: Install just and cargo-sync-rdme
         uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2
         with:
-          tool: cargo-readme
-      - name: Run cargo readme
-        run: ./scripts/regenerate-readmes.sh
+          tool: just,cargo-sync-rdme
+      # Pin to a specific nightly for compatibility with cargo-sync-rdme.
+      - name: Install nightly toolchain for cargo-sync-rdme
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: nightly-2026-09-30
+      - name: Regenerate readmes
+        run: just generate-readmes
       - name: Check for differences
         run: git diff --exit-code
 

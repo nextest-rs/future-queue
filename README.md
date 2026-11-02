@@ -1,16 +1,19 @@
+<!-- cargo-sync-rdme title [[ -->
 # future-queue
-
-[![future-queue on crates.io](https://img.shields.io/crates/v/future-queue)](https://crates.io/crates/future-queue)
-[![Documentation (latest release)](https://img.shields.io/badge/docs-latest-brightgreen.svg)](https://docs.rs/future-queue/)
+<!-- cargo-sync-rdme ]] -->
+<!-- cargo-sync-rdme badge [[ -->
+![License: MIT OR Apache-2.0](https://img.shields.io/crates/l/future-queue.svg?)
+[![crates.io](https://img.shields.io/crates/v/future-queue.svg?logo=rust)](https://crates.io/crates/future-queue)
+[![docs.rs](https://img.shields.io/docsrs/future-queue.svg?logo=docs.rs)](https://docs.rs/future-queue)
+[![Rust: ^1.70.0](https://img.shields.io/badge/rust-^1.70.0-93450a.svg?logo=rust)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field)
+<!-- cargo-sync-rdme ]] -->
 [![Documentation (main)](https://img.shields.io/badge/docs-main-purple)](https://nextest-rs.github.io/future-queue/rustdoc/future_queue)
 [![Changelog](https://img.shields.io/badge/changelog-latest-blue)](CHANGELOG.md)
-[![License](https://img.shields.io/badge/license-Apache-green.svg)](LICENSE-APACHE)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE-MIT)
-
+<!-- cargo-sync-rdme rustdoc [[ -->
 `future_queue` provides ways to run several futures:
 
 * concurrently
-* in the order they're spawned
+* in the order they’re spawned
 * with global limits
 * and with an optional group specified for each future, with its own limits.
 
@@ -35,7 +38,7 @@ Common use cases for `buffer_unordered` include:
 * Running tests with a tool like [cargo-nextest](https://nexte.st).
 
 `buffer_unordered` works well for many use cases. However, one issue with it is that it treats
-all futures as equally taxing: there's no way to say that some futures consume more resources
+all futures as equally taxing: there’s no way to say that some futures consume more resources
 than others, or that some subsets of futures should be mutually excluded from others.
 
 For nextest in particular, some tests can be much heavier than others, and fewer of those tests
@@ -50,9 +53,9 @@ other concurrency limits placed on them.
 
 This crate provides two adaptors on streams.
 
-### 1. The `future_queue` adaptor
+### 1\. The `future_queue` adaptor
 
-The [`future_queue`](StreamExt::future_queue) adaptor can run several futures simultaneously,
+The [`future_queue`][StreamExt::future_queue] adaptor can run several futures simultaneously,
 limiting the concurrency to a maximum *weight*.
 
 Rather than taking a stream of futures, this adaptor takes a stream of
@@ -69,13 +72,13 @@ Once all possible futures are scheduled, this adaptor will wait until some of th
 executing futures complete, and the current weight of running futures drops below the maximum
 weight, before scheduling new futures.
 
-The weight of a future can be zero, in which case it doesn't count towards the maximum weight.
+The weight of a future can be zero, in which case it doesn’t count towards the maximum weight.
 
 If all weights are 1, then `future_queue` is exactly the same as `buffer_unordered`.
 
 #### Examples
 
-```rust
+````rust
 use futures::{channel::oneshot, stream, StreamExt as _};
 use future_queue::{StreamExt as _};
 
@@ -96,21 +99,21 @@ send_one.send("world")?;
 assert_eq!(queue.next().await, Some(Ok("world")));
 
 assert_eq!(queue.next().await, None);
-```
+````
 
-### 2. The `future_queue_grouped` adaptor
+### 2\. The `future_queue_grouped` adaptor
 
-The [`future_queue_grouped`](StreamExt::future_queue_grouped) adaptor is like `future_queue`,
+The [`future_queue_grouped`][StreamExt::future_queue_grouped] adaptor is like `future_queue`,
 except it is possible to specify an optional *group* for each future. Each group has a maximum
 weight, and a future will only be scheduled if both the maximum weight and the group weight
-aren't exceeded.
+aren’t exceeded.
 
 The adaptor is as fair as possible under the given constraints: it will schedule futures in the
-order they're returned by the stream, without doing any reordering based on weight. When a
+order they’re returned by the stream, without doing any reordering based on weight. When a
 future from a group completes, queued up futures in this group will be preferentially scheduled
 before any other futures from the provided stream.
 
-Like with [`future_queue`](StreamExt::future_queue):
+Like with [`future_queue`][StreamExt::future_queue]:
 
 * The maximum global and group weights is never exceeded while futures are being run.
 * While accounting against global weights, if the weight of an individual future is greater than
@@ -120,7 +123,7 @@ Like with [`future_queue`](StreamExt::future_queue):
 
 #### Examples
 
-```rust
+````rust
 use futures::{channel::oneshot, stream, StreamExt as _};
 use future_queue::{FutureQueueContext, StreamExt as _};
 
@@ -144,7 +147,7 @@ send_one.send("world")?;
 assert_eq!(queue.next().await, Some(Ok("world")));
 
 assert_eq!(queue.next().await, None);
-```
+````
 
 ## Minimum supported Rust version (MSRV)
 
@@ -157,7 +160,11 @@ this crate has reached 1.x, any MSRV bump will be accompanied with a new minor v
 ## Notes
 
 This crate used to be called `buffer-unordered-weighted`. It was renamed to `future-queue` to be
-more descriptive about what the crate does rather than how it's implemented.
+more descriptive about what the crate does rather than how it’s implemented.
+
+[StreamExt::future_queue]: https://docs.rs/future-queue/0.4.0/future_queue/trait.StreamExt.html#method.future_queue "method future_queue::StreamExt::future_queue"
+[StreamExt::future_queue_grouped]: https://docs.rs/future-queue/0.4.0/future_queue/trait.StreamExt.html#method.future_queue_grouped "method future_queue::StreamExt::future_queue_grouped"
+<!-- cargo-sync-rdme ]] -->
 
 ## Contributing
 
@@ -170,9 +177,3 @@ the [MIT license](LICENSE-MIT).
 
 The code is derived from [futures-rs](https://github.com/rust-lang/futures-rs), and is used under
 the Apache 2.0 and MIT licenses.
-
-<!--
-README.md is generated from README.tpl by cargo readme. To regenerate, run from the repository root:
-
-./scripts/regenerate-readmes.sh
--->
