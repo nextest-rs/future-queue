@@ -3,3 +3,4 @@
 
 mod group_weights;
 mod properties;
+mod stream_wakeups;
