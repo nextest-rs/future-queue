@@ -26,6 +26,12 @@ proptest-derive = "0.5.1"
 tokio = { version = "1.38.2", features = ["macros", "sync", "test-util", "time"] }
 tokio-stream = { version = "0.1.17" }
 
+[package.metadata.cargo-sync-rdme.badge.badges]
+license = true
+crates-io = true
+docs-rs = true
+rust-version = true
+
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = ["cfg(kani)"]
