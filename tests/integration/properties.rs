@@ -24,7 +24,7 @@ struct TestState<G: GroupSpec> {
 
 #[derive(Copy, Clone, Debug, Arbitrary)]
 struct TestFutureDesc<G: GroupSpec> {
-    #[proptest(strategy = "duration_strategy()")]
+    #[proptest(strategy = "start_delay_strategy()")]
     start_delay: Duration,
     #[proptest(strategy = "duration_strategy()")]
     delay: Duration,
@@ -32,6 +32,16 @@ struct TestFutureDesc<G: GroupSpec> {
     weight: usize,
     #[allow(dead_code)]
     group: G,
+}
+
+fn start_delay_strategy() -> BoxedStrategy<Duration> {
+    // Bias towards bursts so that futures overlap and hit weight limits (#603).
+    prop_oneof![
+        6 => Just(Duration::ZERO),
+        3 => (1u64..20).prop_map(Duration::from_millis),
+        1 => duration_strategy(),
+    ]
+    .boxed()
 }
 
 fn duration_strategy() -> BoxedStrategy<Duration> {
