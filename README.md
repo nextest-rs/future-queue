@@ -169,8 +169,8 @@ this crate has reached 1.x, any MSRV bump will be accompanied with a new minor v
 This crate used to be called `buffer-unordered-weighted`. It was renamed to `future-queue` to be
 more descriptive about what the crate does rather than how it’s implemented.
 
-[StreamExt::future_queue]: https://docs.rs/future-queue/0.4.0/future_queue/trait.StreamExt.html#method.future_queue "method future_queue::StreamExt::future_queue"
-[StreamExt::future_queue_grouped]: https://docs.rs/future-queue/0.4.0/future_queue/trait.StreamExt.html#method.future_queue_grouped "method future_queue::StreamExt::future_queue_grouped"
+[StreamExt::future_queue]: https://docs.rs/future-queue/0.4.1/future_queue/trait.StreamExt.html#method.future_queue "method future_queue::StreamExt::future_queue"
+[StreamExt::future_queue_grouped]: https://docs.rs/future-queue/0.4.1/future_queue/trait.StreamExt.html#method.future_queue_grouped "method future_queue::StreamExt::future_queue_grouped"
 <!-- cargo-sync-rdme ]] -->
 
 ## Contributing
