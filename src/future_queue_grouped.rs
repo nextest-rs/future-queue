@@ -251,7 +251,12 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<Option<<<St::Item as GroupedWeightedFuture>::Future as Future>::Output>> {
         // First, attempt to pull the next value from the in progress queue.
-        let (return_output, mut any_queued) = ready!(self.as_mut().poll_pop_in_progress(cx));
+        // Don't return early on Pending, since the stream must be polled to
+        // register its waker.
+        let (return_output, mut any_queued) = match self.as_mut().poll_pop_in_progress(cx) {
+            Poll::Ready(ret) => ret,
+            Poll::Pending => (None, false),
+        };
 
         let mut this = self.as_mut().project();
 

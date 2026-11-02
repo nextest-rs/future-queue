@@ -6,6 +6,7 @@
 
 - In `future_queue_grouped`, a future waiting in a group's queue is now started as soon as both the global and group weights have room for it. Previously, if room was freed by a future outside that group, the waiting future could be delayed. If no other member of the group was still running, it was dropped without ever running, and the stream ended early (or panicked with debug assertions enabled). ([#603])
 - `FutureQueueGrouped::current_group_weight` now returns the weight of futures currently running in the group. Previously, it returned the group's maximum weight.
+- In `future_queue_grouped`, a new future produced by the input stream while other futures are running is now started right away if there's room for it. Previously, it was not picked up until one of the running futures completed.
 
 [#603]: https://github.com/nextest-rs/future-queue/issues/603
 
