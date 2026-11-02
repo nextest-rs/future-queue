@@ -48,11 +48,9 @@ async fn grouped_picks_up_items_arriving_while_futures_run() {
     });
     drop(sender);
 
-    // BUG: "late" arrives at 1s, but isn't started until "long" completes at 100s.
+    assert_eq!(queue.next().await, Some("late"));
+    assert_eq!(start.elapsed(), Duration::from_millis(1010));
     assert_eq!(queue.next().await, Some("long"));
     assert_eq!(start.elapsed(), Duration::from_secs(100));
-    // BUG: "late" should finish at 1.010s, before "long".
-    assert_eq!(queue.next().await, Some("late"));
-    assert_eq!(start.elapsed(), Duration::from_millis(100_010));
     assert_eq!(queue.next().await, None);
 }
