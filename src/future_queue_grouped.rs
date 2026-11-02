@@ -191,37 +191,12 @@ where
                     data.sub_weight(&id, weight);
                     data.slots.release(group_slot);
 
-                    // Can we queue up additional futures from the queued ones for this ID?
-                    while let Some(&(weight, _, _)) = data.queued.front() {
-                        if this.global_weight.has_space_for(weight) && data.has_space_for(weight) {
-                            // The future can be queued up.
-                            let (weight, id, future_fn) = data.queued.pop_front().unwrap();
-                            this.global_weight.add_weight(weight);
-                            data.add_weight(&id, weight);
-
-                            let global_slot = this.slots.reserve();
-                            let group_slot = data.slots.reserve();
-
-                            let cx = FutureQueueContext {
-                                global_slot,
-                                group_slot: Some(group_slot),
-                            };
-                            let future = future_fn.0(cx);
-
-                            this.in_progress_queue.get_ref().push(FutureWithGW::new(
-                                weight,
-                                global_slot,
-                                Some((id, group_slot)),
-                                future,
-                            ));
-                            any_queued = true;
-                        } else {
-                            // Further futures cannot be queued up since doing so would cause one or
-                            // both of the overall weights to be exceeded -- leave them alone and
-                            // exit the loop.
-                            break;
-                        }
-                    }
+                    any_queued |= start_queued_futures(
+                        data,
+                        this.global_weight,
+                        this.slots,
+                        this.in_progress_queue.get_ref(),
+                    );
                 }
 
                 Poll::Ready((Some(output), any_queued))
@@ -269,23 +244,15 @@ where
                 // Is this group full?
                 let data = this.group_store.get_id_mut_or_unwrap(&id);
                 if data.has_space_for(weight) {
-                    this.global_weight.add_weight(weight);
-                    data.add_weight(&id, weight);
-
-                    let global_slot = this.slots.reserve();
-                    let group_slot = data.slots.reserve();
-
-                    let cx = FutureQueueContext {
-                        global_slot,
-                        group_slot: Some(group_slot),
-                    };
-                    let future = future_fn(cx);
-                    this.in_progress_queue.get_ref().push(FutureWithGW::new(
+                    start_grouped_future(
                         weight,
-                        global_slot,
-                        Some((id, group_slot)),
-                        future,
-                    ));
+                        id,
+                        future_fn,
+                        data,
+                        this.global_weight,
+                        this.slots,
+                        this.in_progress_queue.get_ref(),
+                    );
                     any_queued = true;
                 } else {
                     data.queued.push_back((weight, id, DebugIgnore(future_fn)));
@@ -370,6 +337,79 @@ where
     }
 }
 
+/// Attempts to start queued futures.
+///
+/// Returns true if any futures were started.
+fn start_queued_futures<Q, F, Fut>(
+    data: &mut GroupData<Q, F>,
+    global_weight: &mut GlobalWeight,
+    slots: &mut SlotReservations,
+    in_progress_queue: &FuturesUnordered<FutureWithGW<Fut, Q>>,
+) -> bool
+where
+    Q: fmt::Debug,
+    F: FnOnce(FutureQueueContext) -> Fut,
+{
+    let mut any_started = false;
+    while let Some(&(weight, _, _)) = data.queued.front() {
+        if !data.can_start(weight, global_weight) {
+            break;
+        }
+
+        let (weight, id, future_fn) = data
+            .queued
+            .pop_front()
+            .expect("front() returned Some, so pop_front() returns Some");
+        start_grouped_future(
+            weight,
+            id,
+            future_fn.0,
+            data,
+            global_weight,
+            slots,
+            in_progress_queue,
+        );
+        any_started = true;
+    }
+    any_started
+}
+
+/// Starts a grouped future, adding it to the in-progress queue.
+///
+/// The caller must have checked that there is space in both the global and
+/// group weights for this future. (See [`GroupData::can_start`].)
+fn start_grouped_future<Q, F, Fut>(
+    weight: usize,
+    id: Q,
+    future_fn: F,
+    data: &mut GroupData<Q, F>,
+    global_weight: &mut GlobalWeight,
+    slots: &mut SlotReservations,
+    in_progress_queue: &FuturesUnordered<FutureWithGW<Fut, Q>>,
+) where
+    Q: fmt::Debug,
+    F: FnOnce(FutureQueueContext) -> Fut,
+{
+    global_weight.add_weight(weight);
+    data.add_weight(&id, weight);
+
+    let global_slot = slots.reserve();
+    let group_slot = data.slots.reserve();
+
+    let cx = FutureQueueContext {
+        global_slot,
+        group_slot: Some(group_slot),
+    };
+    let future = future_fn(cx);
+
+    in_progress_queue.push(FutureWithGW::new(
+        weight,
+        global_slot,
+        Some((id, group_slot)),
+        future,
+    ));
+}
+
 struct GroupStore<Q, K, F> {
     group_data: FnvHashMap<K, GroupData<Q, F>>,
 }
@@ -448,6 +488,10 @@ impl<Q: fmt::Debug, Fut> GroupData<Q, Fut> {
     fn has_space_for(&self, weight: usize) -> bool {
         let weight = weight.min(self.max_weight);
         self.current_weight <= self.max_weight - weight
+    }
+
+    fn can_start(&self, weight: usize, global_weight: &GlobalWeight) -> bool {
+        global_weight.has_space_for(weight) && self.has_space_for(weight)
     }
 
     // The ID is passed in only for its Debug impl.
